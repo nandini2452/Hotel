@@ -1,0 +1,21 @@
+# Django / Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+backend/.venv/
+backend/db.sqlite3
+backend/staticfiles/
+
+# React / Node.js
+node_modules/
+dist/
+dist-ssr/
+*.local
+.eslintcache
+
+# Logs & OS Files
+*.log
+.DS_Store
+Thumbs.db
