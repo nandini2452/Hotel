@@ -264,6 +264,13 @@ function App() {
       return;
     }
 
+    // Validate phone number: exactly 10 digits
+    const phoneRegex = /^\d{10}$/;
+    if (!phoneRegex.test(newBooking.guest_phone)) {
+      triggerToast('Phone number must be exactly 10 digits.');
+      return;
+    }
+
     // Validate advance paid
     const advancePaidNum = parseFloat(newBooking.advance_paid);
     if (isNaN(advancePaidNum) || advancePaidNum < selectedRoom.min_advance) {
@@ -557,8 +564,14 @@ function App() {
                         type="tel"
                         className="input-control"
                         required
+                        maxLength={10}
+                        pattern="\d{10}"
+                        placeholder="Enter 10-digit number"
                         value={newBooking.guest_phone}
-                        onChange={e => setNewBooking(prev => ({ ...prev, guest_phone: e.target.value }))}
+                        onChange={e => {
+                          const val = e.target.value.replace(/\D/g, '');
+                          setNewBooking(prev => ({ ...prev, guest_phone: val }));
+                        }}
                       />
                     </div>
                     <div className="form-group">

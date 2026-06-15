@@ -195,6 +195,10 @@ def my_hotel_bookings(request):
         if not all([room_id, guest_first_name, guest_last_name, guest_phone, check_in, check_out]):
             return Response({"detail": "Missing required booking fields."}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Validate phone number is exactly 10 digits
+        if not (len(guest_phone) == 10 and guest_phone.isdigit()):
+            return Response({"detail": "Phone number must be exactly 10 digits."}, status=status.HTTP_400_BAD_REQUEST)
+
         try:
             room = Room.objects.get(id=room_id)
         except Room.DoesNotExist:
