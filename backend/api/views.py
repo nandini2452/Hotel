@@ -272,8 +272,11 @@ def my_hotel_bookings(request):
             "id": booking.id,
             "room_id": booking.room.id,
             "room_number": booking.room.number,
+            "room_type": booking.room.room_type,
             "guest_first_name": booking.guest_first_name,
             "guest_last_name": booking.guest_last_name,
+            "guest_phone": booking.guest_phone,
+            "guest_email": booking.guest_email,
             "check_in": booking.check_in.strftime('%Y-%m-%d'),
             "check_in_time": booking.check_in_time,
             "check_out": booking.check_out.strftime('%Y-%m-%d'),
@@ -384,6 +387,9 @@ def my_hotel_booking_detail(request, pk):
         booking.save()
         return Response({
             "id": booking.id,
+            "room_id": booking.room.id,
+            "room_number": booking.room.number,
+            "room_type": booking.room.room_type,
             "guest_first_name": booking.guest_first_name,
             "guest_last_name": booking.guest_last_name,
             "guest_phone": booking.guest_phone,

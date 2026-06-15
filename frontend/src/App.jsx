@@ -24,6 +24,11 @@ function App() {
   const [isEditMode, setIsEditMode] = useState(false);
   const [editingBookingId, setEditingBookingId] = useState(null);
   const [selectedRoom, setSelectedRoom] = useState(null);
+  
+  // Contact guest states
+  const [contactModalOpen, setContactModalOpen] = useState(false);
+  const [contactBooking, setContactBooking] = useState(null);
+  const [customMessage, setCustomMessage] = useState('');
   const [newBooking, setNewBooking] = useState({
     guest_first_name: '',
     guest_last_name: '',
@@ -242,7 +247,7 @@ function App() {
   };
 
   const handleOpenEditModal = (booking) => {
-    const room = rooms.find(r => r.id === booking.room_id);
+    const room = rooms.find(r => Number(r.id) === Number(booking.room_id));
     if (!room) {
       triggerToast('Room not found for this reservation.');
       return;
@@ -265,6 +270,85 @@ function App() {
       advance_status: booking.advance_status || 'Paid'
     });
     setModalOpen(true);
+  };
+
+  const isCheckoutPassed = (booking) => {
+    if (booking.status !== 'Checked-In') return false;
+    if (!booking.check_out) return false;
+    
+    try {
+      const [year, month, day] = booking.check_out.split('-').map(Number);
+      const timeStr = booking.check_out_time || '12:00 PM';
+      const [time, modifier] = timeStr.split(' ');
+      let [hours, minutes] = time.split(':').map(Number);
+      if (isNaN(minutes)) minutes = 0;
+      
+      if (modifier === 'PM' && hours !== 12) {
+        hours += 12;
+      } else if (modifier === 'AM' && hours === 12) {
+        hours = 0;
+      }
+      
+      const checkoutDateObj = new Date(year, month - 1, day, hours, minutes);
+      const currentDate = new Date();
+      
+      return currentDate > checkoutDateObj;
+    } catch (e) {
+      console.error('Error parsing check_out date/time', e);
+      return false;
+    }
+  };
+
+  const handleQuickCheckout = (bookingId) => {
+    if (!window.confirm('Mark this guest as Checked-Out and free up the room?')) return;
+    
+    fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/${bookingId}/`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Token ${token}`
+      },
+      body: JSON.stringify({
+        status: 'Checked-Out'
+      })
+    })
+      .then(async res => {
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.detail || 'Failed to check out guest');
+        }
+        return data;
+      })
+      .then(() => {
+        triggerToast('Guest checked out successfully! Room is now vacant.');
+        // Refresh bookings
+        fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/?hotel_code=${hotelCode}`, {
+          headers: { 'Authorization': `Token ${token}` }
+        })
+          .then(res => res.json())
+          .then(data => setBookings(data));
+      })
+      .catch(err => {
+        console.error(err);
+        triggerToast(err.message || 'Error occurred during check-out.');
+      });
+  };
+
+  const handleOpenContactModal = (booking) => {
+    setContactBooking(booking);
+    setCustomMessage(`Dear ${booking.guest_first_name} ${booking.guest_last_name}, your check-out time for room ${booking.room_number} was scheduled for ${booking.check_out} at ${booking.check_out_time} and has passed. Please contact the front desk to complete your checkout. Thank you.`);
+    setContactModalOpen(true);
+  };
+
+  const handleCloseContactModal = () => {
+    setContactModalOpen(false);
+    setContactBooking(null);
+    setCustomMessage('');
+  };
+
+  const handleSimulateSendMessage = () => {
+    triggerToast(`Simulated message successfully dispatched to ${contactBooking.guest_first_name} (+91 ${contactBooking.guest_phone})!`);
+    handleCloseContactModal();
   };
 
   const handleCloseModal = () => {
@@ -411,11 +495,12 @@ function App() {
     let i = 0;
     while (i < 14) {
       const dateStr = formatDate(dates[i]);
-      // Find booking covering dateStr
+      // Find booking covering dateStr (excluding Checked-Out bookings)
       const booking = bookings.find(b => 
-        b.room_id === room.id && 
+        Number(b.room_id) === Number(room.id) && 
         b.check_in <= dateStr && 
-        b.check_out > dateStr
+        b.check_out > dateStr &&
+        b.status !== 'Checked-Out'
       );
       
       if (booking) {
@@ -440,12 +525,23 @@ function App() {
                 handleOpenEditModal(booking);
               }}
             >
-              <div className="booking-info-block">
-                <span className="booking-guest-name">{booking.guest_first_name} {booking.guest_last_name}</span>
-                <span className="booking-badge">{booking.status}</span>
-                <span className="booking-advance" style={booking.advance_status === 'Unpaid' ? { color: '#f87171', fontSize: '0.65rem', fontWeight: 'bold' } : {}}>
-                  {booking.advance_status === 'Unpaid' ? 'Incomplete Advance' : `₹${parseFloat(booking.advance_paid).toLocaleString('en-IN')}`}
-                </span>
+              <div 
+                className="booking-info-block"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleOpenEditModal(booking);
+                }}
+              >
+                <div className="booking-header-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                  <span className="booking-guest-name" style={{ maxWidth: '85%' }}>{booking.guest_first_name} {booking.guest_last_name}</span>
+                  <span className="booking-edit-indicator" title="Click to Edit" style={{ fontSize: '0.75rem', opacity: 0.6 }}>✏️</span>
+                </div>
+                <div className="booking-footer-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', marginTop: '4px' }}>
+                  <span className="booking-badge">{booking.status}</span>
+                  <span className="booking-advance" style={booking.advance_status === 'Unpaid' ? { color: '#f87171', fontSize: '0.65rem', fontWeight: 'bold' } : {}}>
+                    {booking.advance_status === 'Unpaid' ? 'Incomplete Advance' : `₹${parseFloat(booking.advance_paid).toLocaleString('en-IN')}`}
+                  </span>
+                </div>
               </div>
             </td>
           );
@@ -471,6 +567,8 @@ function App() {
     return cells;
   };
 
+  const overdueBookings = bookings.filter(isCheckoutPassed);
+
   return (
     <>
       {/* Toast Notification Container */}
@@ -495,6 +593,44 @@ function App() {
               <p>Code: {hotelCode} | Welcome, <strong>{loggedInUser}</strong></p>
             </div>
           </div>
+
+          {/* Stay Expiry Alerts */}
+          {overdueBookings.length > 0 && (
+            <div className="overdue-alerts-container">
+              <div className="alerts-header">
+                <span className="alerts-icon">⚠️</span>
+                <h3>Overdue Check-Out Alerts ({overdueBookings.length})</h3>
+              </div>
+              <div className="alerts-list">
+                {overdueBookings.map(b => (
+                  <div key={b.id} className="alert-card">
+                    <div className="alert-info">
+                      <span style={{ fontSize: '1rem' }}>
+                        Room <strong>{b.room_number}</strong> ({b.room_type}) - Guest: <strong>{b.guest_first_name} {b.guest_last_name}</strong>
+                      </span>
+                      <span className="alert-time-badge">
+                        ⏰ Scheduled Check-Out was: {b.check_out} at {b.check_out_time}
+                      </span>
+                    </div>
+                    <div className="alert-actions">
+                      <button 
+                        className="btn-checkout-alert"
+                        onClick={() => handleQuickCheckout(b.id)}
+                      >
+                        Check-Out
+                      </button>
+                      <button 
+                        className="btn-contact-alert"
+                        onClick={() => handleOpenContactModal(b)}
+                      >
+                        Contact Guest
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Front Desk Scheduler Grid */}
           <div className="calendar-card">
@@ -724,6 +860,7 @@ function App() {
                         <option value="Temp Reserve">Temp Reserve</option>
                         <option value="Reserve">Reserve</option>
                         <option value="Checked-In">Checked-In</option>
+                        {isEditMode && <option value="Checked-Out">Checked-Out</option>}
                       </select>
                     </div>
                     <div className="form-group">
@@ -847,6 +984,75 @@ function App() {
               {loading ? 'Authenticating...' : 'Sign In'}
             </button>
           </form>
+        </div>
+      )}
+
+      {/* Contact Guest Modal */}
+      {contactModalOpen && contactBooking && (
+        <div className="modal-backdrop" onClick={handleCloseContactModal}>
+          <div className="modal-content" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Contact Guest - Overdue Check-Out</h3>
+              <button className="btn-close" onClick={handleCloseContactModal}>&times;</button>
+            </div>
+            <div style={{ marginBottom: '1.25rem' }}>
+              <p style={{ margin: '0 0 0.5rem 0', color: 'var(--text-secondary)' }}>
+                Guest Name: <strong style={{ color: '#fff' }}>{contactBooking.guest_first_name} {contactBooking.guest_last_name}</strong>
+              </p>
+              <p style={{ margin: '0 0 0.5rem 0', color: 'var(--text-secondary)' }}>
+                Mobile Number: <strong style={{ color: '#fff' }}>+91 {contactBooking.guest_phone}</strong>
+              </p>
+              <p style={{ margin: '0 0 1rem 0', color: 'var(--text-secondary)' }}>
+                Room: <strong style={{ color: '#fff' }}>{contactBooking.room_number} ({contactBooking.room_type})</strong>
+              </p>
+            </div>
+            <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+              <label className="form-label">Message Content</label>
+              <textarea
+                className="input-control"
+                rows={4}
+                value={customMessage}
+                onChange={e => setCustomMessage(e.target.value)}
+                style={{ background: 'rgba(15, 23, 42, 0.85)', color: '#fff', resize: 'vertical', fontFamily: 'inherit' }}
+              />
+            </div>
+            <div className="contact-modal-actions" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              <div style={{ display: 'flex', gap: '0.75rem' }}>
+                <a 
+                  href={`https://api.whatsapp.com/send?phone=91${contactBooking.guest_phone}&text=${encodeURIComponent(customMessage)}`}
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="btn-contact-option whatsapp"
+                  style={{ flex: 1, textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', background: '#25D366', color: '#fff', padding: '0.75rem', borderRadius: '10px', fontWeight: 'bold', border: 'none', cursor: 'pointer', textAlign: 'center' }}
+                >
+                  💬 Send WhatsApp
+                </a>
+                <a 
+                  href={`sms:+91${contactBooking.guest_phone}?body=${encodeURIComponent(customMessage)}`}
+                  className="btn-contact-option sms"
+                  style={{ flex: 1, textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', background: '#3b82f6', color: '#fff', padding: '0.75rem', borderRadius: '10px', fontWeight: 'bold', border: 'none', cursor: 'pointer', textAlign: 'center' }}
+                >
+                  📱 Send SMS
+                </a>
+              </div>
+              <button 
+                type="button" 
+                className="btn-submit-modal" 
+                onClick={handleSimulateSendMessage}
+                style={{ width: '100%', padding: '0.75rem' }}
+              >
+                ⚡ Simulate Message Send
+              </button>
+              <button 
+                type="button" 
+                className="btn-cancel" 
+                onClick={handleCloseContactModal}
+                style={{ width: '100%', padding: '0.75rem' }}
+              >
+                Close / Wait
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </>

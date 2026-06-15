@@ -33,6 +33,7 @@ class Booking(models.Model):
         ('Temp Reserve', 'Temp Reserve'),
         ('Reserve', 'Reserve'),
         ('Checked-In', 'Checked-In'),
+        ('Checked-Out', 'Checked-Out'),
     ]
     room = models.ForeignKey(Room, on_delete=models.CASCADE, related_name='bookings')
     guest_first_name = models.CharField(max_length=100)
