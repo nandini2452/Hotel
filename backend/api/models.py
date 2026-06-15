@@ -40,10 +40,12 @@ class Booking(models.Model):
     guest_phone = models.CharField(max_length=20)
     guest_email = models.EmailField(blank=True, null=True)
     check_in = models.DateField()
+    check_in_time = models.CharField(max_length=10, default="12:00 PM")
     check_out = models.DateField()
+    check_out_time = models.CharField(max_length=10, default="12:00 PM")
     status = models.CharField(max_length=50, choices=STATUS_CHOICES, default='Reserve')
     advance_paid = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
 
     def __str__(self):
-        return f"{self.guest_first_name} {self.guest_last_name} - Room {self.room.number} ({self.check_in} to {self.check_out})"
+        return f"{self.guest_first_name} {self.guest_last_name} - Room {self.room.number} ({self.check_in} {self.check_in_time} to {self.check_out} {self.check_out_time})"
 

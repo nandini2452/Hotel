@@ -111,7 +111,9 @@ class Command(BaseCommand):
             guest_phone="9876543210",
             guest_email="ramesh@example.com",
             check_in=today,
+            check_in_time="12:00 PM",
             check_out=today + datetime.timedelta(days=2),
+            check_out_time="12:00 PM",
             status="Reserve",
             advance_paid=500.00
         )
@@ -122,7 +124,9 @@ class Command(BaseCommand):
             guest_phone="9876543211",
             guest_email="priya@example.com",
             check_in=today + datetime.timedelta(days=1),
+            check_in_time="12:00 PM",
             check_out=today + datetime.timedelta(days=4),
+            check_out_time="12:00 PM",
             status="Checked-In",
             advance_paid=1000.00
         )
@@ -133,7 +137,9 @@ class Command(BaseCommand):
             guest_phone="9876543212",
             guest_email="amit@example.com",
             check_in=today + datetime.timedelta(days=3),
+            check_in_time="12:00 PM",
             check_out=today + datetime.timedelta(days=6),
+            check_out_time="12:00 PM",
             status="Hold",
             advance_paid=2000.00
         )
@@ -149,7 +155,9 @@ class Command(BaseCommand):
             guest_phone="9876543213",
             guest_email="suresh@example.com",
             check_in=today,
+            check_in_time="12:00 PM",
             check_out=today + datetime.timedelta(days=3),
+            check_out_time="12:00 PM",
             status="Reserve",
             advance_paid=500.00
         )
@@ -160,7 +168,9 @@ class Command(BaseCommand):
             guest_phone="9876543214",
             guest_email="anjali@example.com",
             check_in=today + datetime.timedelta(days=2),
+            check_in_time="12:00 PM",
             check_out=today + datetime.timedelta(days=5),
+            check_out_time="12:00 PM",
             status="Checked-In",
             advance_paid=1500.00
         )

@@ -170,7 +170,9 @@ def my_hotel_bookings(request):
                 "guest_phone": b.guest_phone,
                 "guest_email": b.guest_email,
                 "check_in": b.check_in.strftime('%Y-%m-%d'),
+                "check_in_time": b.check_in_time,
                 "check_out": b.check_out.strftime('%Y-%m-%d'),
+                "check_out_time": b.check_out_time,
                 "status": b.status,
                 "advance_paid": b.advance_paid
             })
@@ -184,7 +186,9 @@ def my_hotel_bookings(request):
         guest_phone = request.data.get('guest_phone')
         guest_email = request.data.get('guest_email')
         check_in = request.data.get('check_in')
+        check_in_time = request.data.get('check_in_time', '12:00 PM')
         check_out = request.data.get('check_out')
+        check_out_time = request.data.get('check_out_time', '12:00 PM')
         status_val = request.data.get('status', 'Reserve')
         advance_paid = request.data.get('advance_paid', 0.00)
 
@@ -247,7 +251,9 @@ def my_hotel_bookings(request):
             guest_phone=guest_phone,
             guest_email=guest_email,
             check_in=check_in_date,
+            check_in_time=check_in_time,
             check_out=check_out_date,
+            check_out_time=check_out_time,
             status=status_val,
             advance_paid=advance_paid_dec
         )
@@ -259,7 +265,9 @@ def my_hotel_bookings(request):
             "guest_first_name": booking.guest_first_name,
             "guest_last_name": booking.guest_last_name,
             "check_in": booking.check_in.strftime('%Y-%m-%d'),
+            "check_in_time": booking.check_in_time,
             "check_out": booking.check_out.strftime('%Y-%m-%d'),
+            "check_out_time": booking.check_out_time,
             "status": booking.status,
             "advance_paid": booking.advance_paid
         }, status=status.HTTP_201_CREATED)

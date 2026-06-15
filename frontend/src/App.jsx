@@ -1,5 +1,10 @@
 import React, { useState, useEffect } from 'react';
 
+const TIME_OPTIONS = [
+  '12:00 AM', '1:00 AM', '2:00 AM', '3:00 AM', '4:00 AM', '5:00 AM', '6:00 AM', '7:00 AM', '8:00 AM', '9:00 AM', '10:00 AM', '11:00 AM',
+  '12:00 PM', '1:00 PM', '2:00 PM', '3:00 PM', '4:00 PM', '5:00 PM', '6:00 PM', '7:00 PM', '8:00 PM', '9:00 PM', '10:00 PM', '11:00 PM'
+];
+
 function App() {
   const [hotels, setHotels] = useState([]);
   const [selectedHotel, setSelectedHotel] = useState(null);
@@ -23,7 +28,9 @@ function App() {
     guest_phone: '',
     guest_email: '',
     check_in: '',
+    check_in_time: '12:00 PM',
     check_out: '',
+    check_out_time: '12:00 PM',
     status: 'Reserve',
     advance_paid: 0
   });
@@ -219,7 +226,9 @@ function App() {
       guest_phone: '',
       guest_email: '',
       check_in: checkInStr,
+      check_in_time: '12:00 PM',
       check_out: checkOutStr,
+      check_out_time: '12:00 PM',
       status: 'Reserve',
       advance_paid: room.min_advance
     });
@@ -283,7 +292,9 @@ function App() {
         guest_phone: newBooking.guest_phone,
         guest_email: newBooking.guest_email,
         check_in: newBooking.check_in,
+        check_in_time: newBooking.check_in_time,
         check_out: newBooking.check_out,
+        check_out_time: newBooking.check_out_time,
         status: newBooking.status,
         advance_paid: advancePaidNum
       })
@@ -344,7 +355,12 @@ function App() {
               className={`booking-cell status-${booking.status.toLowerCase().replace(' ', '-')}`}
               onClick={(e) => {
                 e.stopPropagation();
-                triggerToast(`Guest: ${booking.guest_first_name} ${booking.guest_last_name} | Phone: ${booking.guest_phone} | Paid: ₹${booking.advance_paid}`);
+                triggerToast(
+                  `Guest: ${booking.guest_first_name} ${booking.guest_last_name} | ` +
+                  `Phone: ${booking.guest_phone} | ` +
+                  `Timings: ${booking.check_in} (${booking.check_in_time || '12:00 PM'}) to ${booking.check_out} (${booking.check_out_time || '12:00 PM'}) | ` +
+                  `Paid: ₹${booking.advance_paid}`
+                );
               }}
             >
               <div className="booking-info-block">
@@ -554,6 +570,8 @@ function App() {
                         onChange={e => setNewBooking(prev => ({ ...prev, guest_email: e.target.value }))}
                       />
                     </div>
+                    
+                    {/* Check-in group */}
                     <div className="form-group">
                       <label className="form-label">Check-In Date</label>
                       <input
@@ -565,6 +583,19 @@ function App() {
                       />
                     </div>
                     <div className="form-group">
+                      <label className="form-label">Check-In Time</label>
+                      <select
+                        className="input-control"
+                        value={newBooking.check_in_time}
+                        onChange={e => setNewBooking(prev => ({ ...prev, check_in_time: e.target.value }))}
+                        style={{ background: 'rgba(15, 23, 42, 0.85)', color: '#fff' }}
+                      >
+                        {TIME_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                      </select>
+                    </div>
+
+                    {/* Check-out group */}
+                    <div className="form-group">
                       <label className="form-label">Check-Out Date</label>
                       <input
                         type="date"
@@ -574,6 +605,18 @@ function App() {
                         onChange={e => setNewBooking(prev => ({ ...prev, check_out: e.target.value }))}
                       />
                     </div>
+                    <div className="form-group">
+                      <label className="form-label">Check-Out Time</label>
+                      <select
+                        className="input-control"
+                        value={newBooking.check_out_time}
+                        onChange={e => setNewBooking(prev => ({ ...prev, check_out_time: e.target.value }))}
+                        style={{ background: 'rgba(15, 23, 42, 0.85)', color: '#fff' }}
+                      >
+                        {TIME_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                      </select>
+                    </div>
+
                     <div className="form-group">
                       <label className="form-label">Booking Status</label>
                       <select
