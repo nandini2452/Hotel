@@ -44,8 +44,13 @@ class Booking(models.Model):
     check_out = models.DateField()
     check_out_time = models.CharField(max_length=10, default="12:00 PM")
     status = models.CharField(max_length=50, choices=STATUS_CHOICES, default='Reserve')
+    ADVANCE_STATUS_CHOICES = [
+        ('Paid', 'Paid'),
+        ('Unpaid', 'Unpaid'),
+    ]
     advance_paid = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    advance_status = models.CharField(max_length=20, choices=ADVANCE_STATUS_CHOICES, default='Paid')
 
     def __str__(self):
-        return f"{self.guest_first_name} {self.guest_last_name} - Room {self.room.number} ({self.check_in} {self.check_in_time} to {self.check_out} {self.check_out_time})"
+        return f"{self.guest_first_name} {self.guest_last_name} - Room {self.room.number} ({self.check_in} {self.check_in_time} to {self.check_out} {self.check_out_time}) - Advance: {self.advance_status}"
 

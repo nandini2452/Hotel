@@ -141,7 +141,8 @@ class Command(BaseCommand):
             check_out=today + datetime.timedelta(days=6),
             check_out_time="12:00 PM",
             status="Hold",
-            advance_paid=2000.00
+            advance_paid=0.00,
+            advance_status="Unpaid"
         )
 
         # Seed rooms and bookings for hotel_b

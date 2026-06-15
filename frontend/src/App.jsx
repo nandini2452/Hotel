@@ -32,7 +32,8 @@ function App() {
     check_out: '',
     check_out_time: '12:00 PM',
     status: 'Reserve',
-    advance_paid: 0
+    advance_paid: 0,
+    advance_status: 'Paid'
   });
 
   // 14-day rolling window calendar starting from today
@@ -230,7 +231,8 @@ function App() {
       check_out: checkOutStr,
       check_out_time: '12:00 PM',
       status: 'Reserve',
-      advance_paid: room.min_advance
+      advance_paid: room.min_advance,
+      advance_status: 'Paid'
     });
     setModalOpen(true);
   };
@@ -273,9 +275,11 @@ function App() {
 
     // Validate advance paid
     const advancePaidNum = parseFloat(newBooking.advance_paid);
-    if (isNaN(advancePaidNum) || advancePaidNum < selectedRoom.min_advance) {
-      triggerToast(`Minimum required advance is ₹${selectedRoom.min_advance} for ${selectedRoom.room_type} rooms.`);
-      return;
+    if (newBooking.advance_status === 'Paid') {
+      if (isNaN(advancePaidNum) || advancePaidNum < selectedRoom.min_advance) {
+        triggerToast(`Minimum required advance is ₹${selectedRoom.min_advance} for ${selectedRoom.room_type} rooms.`);
+        return;
+      }
     }
 
     // Validate dates
@@ -303,7 +307,8 @@ function App() {
         check_out: newBooking.check_out,
         check_out_time: newBooking.check_out_time,
         status: newBooking.status,
-        advance_paid: advancePaidNum
+        advance_paid: newBooking.advance_status === 'Unpaid' ? 0.00 : advancePaidNum,
+        advance_status: newBooking.advance_status
       })
     })
       .then(async res => {
@@ -366,14 +371,16 @@ function App() {
                   `Guest: ${booking.guest_first_name} ${booking.guest_last_name} | ` +
                   `Phone: ${booking.guest_phone} | ` +
                   `Timings: ${booking.check_in} (${booking.check_in_time || '12:00 PM'}) to ${booking.check_out} (${booking.check_out_time || '12:00 PM'}) | ` +
-                  `Paid: ₹${booking.advance_paid}`
+                  `Advance: ${booking.advance_status === 'Unpaid' ? 'Incomplete' : `₹${parseFloat(booking.advance_paid).toLocaleString('en-IN')}`}`
                 );
               }}
             >
               <div className="booking-info-block">
                 <span className="booking-guest-name">{booking.guest_first_name} {booking.guest_last_name}</span>
                 <span className="booking-badge">{booking.status}</span>
-                <span className="booking-advance">₹{parseFloat(booking.advance_paid).toLocaleString('en-IN')}</span>
+                <span className="booking-advance" style={booking.advance_status === 'Unpaid' ? { color: '#f87171', fontSize: '0.65rem', fontWeight: 'bold' } : {}}>
+                  {booking.advance_status === 'Unpaid' ? 'Incomplete Advance' : `₹${parseFloat(booking.advance_paid).toLocaleString('en-IN')}`}
+                </span>
               </div>
             </td>
           );
@@ -531,9 +538,12 @@ function App() {
                     <h4>Room: {selectedRoom?.number} ({selectedRoom?.room_type})</h4>
                     <div className="summary-grid">
                       <div className="summary-item">Nightly Rate: <span>₹{parseFloat(selectedRoom?.price).toLocaleString('en-IN')}</span></div>
-                      <div className="summary-item">Min Advance: <span>₹{parseFloat(selectedRoom?.min_advance).toLocaleString('en-IN')}</span></div>
+                      <div className="summary-item">Min Advance Required: <span>₹{parseFloat(selectedRoom?.min_advance).toLocaleString('en-IN')}</span></div>
                       <div className="summary-item">Nights Count: <span>{calculateNightsCount()}</span></div>
                       <div className="summary-item">Total Cost: <span>₹{calculateTotalCost().toLocaleString('en-IN')}</span></div>
+                      <div className="summary-item col-span-2" style={{ borderTop: '1px solid rgba(255, 255, 255, 0.05)', paddingTop: '4px', marginTop: '4px' }}>
+                        Advance Status: <span style={newBooking.advance_status === 'Unpaid' ? { color: '#f87171', fontWeight: 'bold' } : { color: '#4ade80', fontWeight: 'bold' }}>{newBooking.advance_status === 'Unpaid' ? 'Unpaid (Incomplete)' : 'Paid'}</span>
+                      </div>
                     </div>
                   </div>
 
@@ -652,14 +662,35 @@ function App() {
                       </select>
                     </div>
                     <div className="form-group">
+                      <label className="form-label">Advance Status</label>
+                      <select
+                        className="input-control"
+                        value={newBooking.advance_status}
+                        onChange={e => {
+                          const status = e.target.value;
+                          setNewBooking(prev => ({
+                            ...prev,
+                            advance_status: status,
+                            advance_paid: status === 'Unpaid' ? 0 : selectedRoom?.min_advance
+                          }));
+                        }}
+                        style={{ background: 'rgba(15, 23, 42, 0.85)', color: '#fff' }}
+                      >
+                        <option value="Paid">Paid</option>
+                        <option value="Unpaid">Unpaid</option>
+                      </select>
+                    </div>
+                    <div className="form-group">
                       <label className="form-label">Advance Paid (₹)</label>
                       <input
                         type="number"
                         className="input-control"
                         required
-                        min={selectedRoom?.min_advance}
-                        value={newBooking.advance_paid}
+                        disabled={newBooking.advance_status === 'Unpaid'}
+                        min={newBooking.advance_status === 'Paid' ? selectedRoom?.min_advance : 0}
+                        value={newBooking.advance_status === 'Unpaid' ? 0 : newBooking.advance_paid}
                         onChange={e => setNewBooking(prev => ({ ...prev, advance_paid: e.target.value }))}
+                        style={newBooking.advance_status === 'Unpaid' ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                       />
                     </div>
                   </div>

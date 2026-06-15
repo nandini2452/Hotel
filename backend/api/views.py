@@ -174,7 +174,8 @@ def my_hotel_bookings(request):
                 "check_out": b.check_out.strftime('%Y-%m-%d'),
                 "check_out_time": b.check_out_time,
                 "status": b.status,
-                "advance_paid": b.advance_paid
+                "advance_paid": b.advance_paid,
+                "advance_status": b.advance_status
             })
         return Response(data, status=status.HTTP_200_OK)
 
@@ -191,6 +192,7 @@ def my_hotel_bookings(request):
         check_out_time = request.data.get('check_out_time', '12:00 PM')
         status_val = request.data.get('status', 'Reserve')
         advance_paid = request.data.get('advance_paid', 0.00)
+        advance_status_val = request.data.get('advance_status', 'Paid')
 
         if not all([room_id, guest_first_name, guest_last_name, guest_phone, check_in, check_out]):
             return Response({"detail": "Missing required booking fields."}, status=status.HTTP_400_BAD_REQUEST)
@@ -236,8 +238,11 @@ def my_hotel_bookings(request):
         except ValueError:
             return Response({"detail": "Advance paid must be a number."}, status=status.HTTP_400_BAD_REQUEST)
 
-        if advance_paid_dec < min_advance:
-            return Response({"detail": f"Minimum advance payment of ₹{min_advance} is required for {room.room_type} rooms."}, status=status.HTTP_400_BAD_REQUEST)
+        if advance_status_val == 'Unpaid':
+            advance_paid_dec = 0.00
+        else:
+            if advance_paid_dec < min_advance:
+                return Response({"detail": f"Minimum advance payment of ₹{min_advance} is required for {room.room_type} rooms."}, status=status.HTTP_400_BAD_REQUEST)
 
         # Check for booking overlaps
         overlapping_bookings = Booking.objects.filter(
@@ -259,7 +264,8 @@ def my_hotel_bookings(request):
             check_out=check_out_date,
             check_out_time=check_out_time,
             status=status_val,
-            advance_paid=advance_paid_dec
+            advance_paid=advance_paid_dec,
+            advance_status=advance_status_val
         )
 
         return Response({
@@ -273,5 +279,6 @@ def my_hotel_bookings(request):
             "check_out": booking.check_out.strftime('%Y-%m-%d'),
             "check_out_time": booking.check_out_time,
             "status": booking.status,
-            "advance_paid": booking.advance_paid
+            "advance_paid": booking.advance_paid,
+            "advance_status": booking.advance_status
         }, status=status.HTTP_201_CREATED)
