@@ -9,3 +9,41 @@ class Hotel(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.code})"
+
+class Room(models.Model):
+    ROOM_TYPES = [
+        ('Standard', 'Standard'),
+        ('Deluxe', 'Deluxe'),
+        ('Superior', 'Superior'),
+    ]
+    hotel = models.ForeignKey(Hotel, on_delete=models.CASCADE, related_name='rooms')
+    number = models.CharField(max_length=50)
+    room_type = models.CharField(max_length=50, choices=ROOM_TYPES)
+    price = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+
+    class Meta:
+        unique_together = ('hotel', 'number')
+
+    def __str__(self):
+        return f"{self.number} ({self.room_type}) - {self.hotel.name}"
+
+class Booking(models.Model):
+    STATUS_CHOICES = [
+        ('Hold', 'Hold'),
+        ('Temp Reserve', 'Temp Reserve'),
+        ('Reserve', 'Reserve'),
+        ('Checked-In', 'Checked-In'),
+    ]
+    room = models.ForeignKey(Room, on_delete=models.CASCADE, related_name='bookings')
+    guest_first_name = models.CharField(max_length=100)
+    guest_last_name = models.CharField(max_length=100)
+    guest_phone = models.CharField(max_length=20)
+    guest_email = models.EmailField(blank=True, null=True)
+    check_in = models.DateField()
+    check_out = models.DateField()
+    status = models.CharField(max_length=50, choices=STATUS_CHOICES, default='Reserve')
+    advance_paid = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+
+    def __str__(self):
+        return f"{self.guest_first_name} {self.guest_last_name} - Room {self.room.number} ({self.check_in} to {self.check_out})"
+
