@@ -282,3 +282,121 @@ def my_hotel_bookings(request):
             "advance_paid": booking.advance_paid,
             "advance_status": booking.advance_status
         }, status=status.HTTP_201_CREATED)
+
+@api_view(['PUT', 'DELETE'])
+@permission_classes([IsAuthenticated])
+def my_hotel_booking_detail(request, pk):
+    """
+    Update or delete an existing booking.
+    """
+    user = request.user
+    try:
+        booking = Booking.objects.get(id=pk)
+    except Booking.DoesNotExist:
+        return Response({"detail": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    hotel = booking.room.hotel
+    is_owner = hotel.owner == user
+    is_manager = hotel.managers.filter(id=user.id).exists()
+    if not (is_owner or is_manager):
+        return Response({"detail": "Not authorized for this hotel."}, status=status.HTTP_403_FORBIDDEN)
+
+    if request.method == 'PUT':
+        guest_first_name = request.data.get('guest_first_name')
+        guest_last_name = request.data.get('guest_last_name')
+        guest_phone = request.data.get('guest_phone')
+        guest_email = request.data.get('guest_email')
+        check_in = request.data.get('check_in')
+        check_in_time = request.data.get('check_in_time')
+        check_out = request.data.get('check_out')
+        check_out_time = request.data.get('check_out_time')
+        status_val = request.data.get('status')
+        advance_paid = request.data.get('advance_paid')
+        advance_status_val = request.data.get('advance_status')
+
+        if guest_phone:
+            if not (len(guest_phone) == 10 and guest_phone.isdigit()):
+                return Response({"detail": "Phone number must be exactly 10 digits."}, status=status.HTTP_400_BAD_REQUEST)
+            booking.guest_phone = guest_phone
+
+        if guest_first_name:
+            booking.guest_first_name = guest_first_name
+        if guest_last_name:
+            booking.guest_last_name = guest_last_name
+        if guest_email is not None:
+            booking.guest_email = guest_email
+        if status_val:
+            booking.status = status_val
+        if advance_status_val:
+            booking.advance_status = advance_status_val
+
+        if check_in or check_out:
+            cin_str = check_in or booking.check_in.strftime('%Y-%m-%d')
+            cout_str = check_out or booking.check_out.strftime('%Y-%m-%d')
+            try:
+                check_in_date = datetime.datetime.strptime(cin_str, '%Y-%m-%d').date()
+                check_out_date = datetime.datetime.strptime(cout_str, '%Y-%m-%d').date()
+            except ValueError:
+                return Response({"detail": "Invalid date format. Use YYYY-MM-DD."}, status=status.HTTP_400_BAD_REQUEST)
+
+            if check_in_date >= check_out_date:
+                return Response({"detail": "Check-out date must be after check-in date."}, status=status.HTTP_400_BAD_REQUEST)
+
+            overlapping_bookings = Booking.objects.filter(
+                room=booking.room,
+                check_in__lt=check_out_date,
+                check_out__gt=check_in_date
+            ).exclude(id=booking.id)
+
+            if overlapping_bookings.exists():
+                return Response({"detail": "This room is already booked for the selected dates."}, status=status.HTTP_400_BAD_REQUEST)
+
+            booking.check_in = check_in_date
+            booking.check_out = check_out_date
+
+        if check_in_time:
+            booking.check_in_time = check_in_time
+        if check_out_time:
+            booking.check_out_time = check_out_time
+
+        if advance_status_val == 'Unpaid':
+            booking.advance_paid = 0.00
+        elif advance_status_val == 'Paid' or advance_paid is not None:
+            adv_val = advance_paid if advance_paid is not None else booking.advance_paid
+            try:
+                advance_paid_dec = float(adv_val)
+            except ValueError:
+                return Response({"detail": "Advance paid must be a number."}, status=status.HTTP_400_BAD_REQUEST)
+
+            if booking.advance_status == 'Paid':
+                min_advance = 0.00
+                if booking.room.room_type == 'Standard':
+                    min_advance = 500.00
+                elif booking.room.room_type == 'Deluxe':
+                    min_advance = 1000.00
+                elif booking.room.room_type == 'Superior':
+                    min_advance = 2000.00
+
+                if advance_paid_dec < min_advance:
+                    return Response({"detail": f"Minimum advance payment of ₹{min_advance} is required for {booking.room.room_type} rooms."}, status=status.HTTP_400_BAD_REQUEST)
+            booking.advance_paid = advance_paid_dec
+
+        booking.save()
+        return Response({
+            "id": booking.id,
+            "guest_first_name": booking.guest_first_name,
+            "guest_last_name": booking.guest_last_name,
+            "guest_phone": booking.guest_phone,
+            "guest_email": booking.guest_email,
+            "check_in": booking.check_in.strftime('%Y-%m-%d'),
+            "check_in_time": booking.check_in_time,
+            "check_out": booking.check_out.strftime('%Y-%m-%d'),
+            "check_out_time": booking.check_out_time,
+            "status": booking.status,
+            "advance_paid": booking.advance_paid,
+            "advance_status": booking.advance_status
+        }, status=status.HTTP_200_OK)
+
+    elif request.method == 'DELETE':
+        booking.delete()
+        return Response({"detail": "Booking deleted successfully."}, status=status.HTTP_204_NO_CONTENT)

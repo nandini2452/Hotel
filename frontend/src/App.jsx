@@ -21,6 +21,8 @@ function App() {
   const [rooms, setRooms] = useState([]);
   const [bookings, setBookings] = useState([]);
   const [modalOpen, setModalOpen] = useState(false);
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [editingBookingId, setEditingBookingId] = useState(null);
   const [selectedRoom, setSelectedRoom] = useState(null);
   const [newBooking, setNewBooking] = useState({
     guest_first_name: '',
@@ -214,6 +216,8 @@ function App() {
   // Modal actions
   const handleOpenReservationModal = (room, date) => {
     setSelectedRoom(room);
+    setIsEditMode(false);
+    setEditingBookingId(null);
     
     // Default dates: check-in is the cell date, check-out is the next day
     const checkInStr = formatDate(date);
@@ -237,9 +241,37 @@ function App() {
     setModalOpen(true);
   };
 
+  const handleOpenEditModal = (booking) => {
+    const room = rooms.find(r => r.id === booking.room_id);
+    if (!room) {
+      triggerToast('Room not found for this reservation.');
+      return;
+    }
+    setSelectedRoom(room);
+    setIsEditMode(true);
+    setEditingBookingId(booking.id);
+    
+    setNewBooking({
+      guest_first_name: booking.guest_first_name,
+      guest_last_name: booking.guest_last_name,
+      guest_phone: booking.guest_phone,
+      guest_email: booking.guest_email || '',
+      check_in: booking.check_in,
+      check_in_time: booking.check_in_time || '12:00 PM',
+      check_out: booking.check_out,
+      check_out_time: booking.check_out_time || '12:00 PM',
+      status: booking.status,
+      advance_paid: booking.advance_paid,
+      advance_status: booking.advance_status || 'Paid'
+    });
+    setModalOpen(true);
+  };
+
   const handleCloseModal = () => {
     setModalOpen(false);
     setSelectedRoom(null);
+    setIsEditMode(false);
+    setEditingBookingId(null);
   };
 
   const calculateNightsCount = () => {
@@ -290,8 +322,14 @@ function App() {
       return;
     }
 
-    fetch('http://127.0.0.1:8000/api/my-hotel/bookings/', {
-      method: 'POST',
+    const url = isEditMode 
+      ? `http://127.0.0.1:8000/api/my-hotel/bookings/${editingBookingId}/` 
+      : 'http://127.0.0.1:8000/api/my-hotel/bookings/';
+      
+    const method = isEditMode ? 'PUT' : 'POST';
+
+    fetch(url, {
+      method: method,
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Token ${token}`
@@ -319,7 +357,7 @@ function App() {
         return data;
       })
       .then(data => {
-        triggerToast('Reservation created successfully!');
+        triggerToast(isEditMode ? 'Reservation updated successfully!' : 'Reservation created successfully!');
         // Refresh bookings
         fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/?hotel_code=${hotelCode}`, {
           headers: { 'Authorization': `Token ${token}` }
@@ -332,6 +370,38 @@ function App() {
       .catch(err => {
         console.error(err);
         triggerToast(err.message || 'Error occurred while saving reservation.');
+      });
+  };
+
+  const handleDeleteBooking = () => {
+    if (!window.confirm('Are you sure you want to cancel this reservation?')) return;
+    
+    fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/${editingBookingId}/`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Token ${token}`
+      }
+    })
+      .then(async res => {
+        if (!res.ok) {
+          const data = await res.json();
+          throw new Error(data.detail || 'Failed to cancel reservation');
+        }
+      })
+      .then(() => {
+        triggerToast('Reservation cancelled successfully!');
+        // Refresh bookings
+        fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/?hotel_code=${hotelCode}`, {
+          headers: { 'Authorization': `Token ${token}` }
+        })
+          .then(res => res.json())
+          .then(data => setBookings(data));
+          
+        handleCloseModal();
+      })
+      .catch(err => {
+        console.error(err);
+        triggerToast(err.message || 'Error occurred while cancelling reservation.');
       });
   };
 
@@ -367,12 +437,7 @@ function App() {
               className={`booking-cell status-${booking.status.toLowerCase().replace(' ', '-')}`}
               onClick={(e) => {
                 e.stopPropagation();
-                triggerToast(
-                  `Guest: ${booking.guest_first_name} ${booking.guest_last_name} | ` +
-                  `Phone: ${booking.guest_phone} | ` +
-                  `Timings: ${booking.check_in} (${booking.check_in_time || '12:00 PM'}) to ${booking.check_out} (${booking.check_out_time || '12:00 PM'}) | ` +
-                  `Advance: ${booking.advance_status === 'Unpaid' ? 'Incomplete' : `₹${parseFloat(booking.advance_paid).toLocaleString('en-IN')}`}`
-                );
+                handleOpenEditModal(booking);
               }}
             >
               <div className="booking-info-block">
@@ -529,7 +594,7 @@ function App() {
             <div className="modal-backdrop" onClick={handleCloseModal}>
               <div className="modal-content" onClick={e => e.stopPropagation()}>
                 <div className="modal-header">
-                  <h3>Add Quick Reservation</h3>
+                  <h3>{isEditMode ? 'Edit Reservation Details' : 'Add Quick Reservation'}</h3>
                   <button className="btn-close" onClick={handleCloseModal}>&times;</button>
                 </div>
                 
@@ -680,7 +745,8 @@ function App() {
                         <option value="Unpaid">Unpaid</option>
                       </select>
                     </div>
-                    <div className="form-group">
+                    
+                    <div className="form-group col-span-2">
                       <label className="form-label">Advance Paid (₹)</label>
                       <input
                         type="number"
@@ -695,9 +761,25 @@ function App() {
                     </div>
                   </div>
 
-                  <div className="modal-actions">
-                    <button type="button" className="btn-cancel" onClick={handleCloseModal}>Cancel</button>
-                    <button type="submit" className="btn-submit-modal">Save Booking</button>
+                  <div className="modal-actions" style={{ justifyContent: 'space-between', display: 'flex', width: '100%' }}>
+                    {isEditMode ? (
+                      <button 
+                        type="button" 
+                        className="btn-cancel" 
+                        style={{ background: 'rgba(239, 68, 68, 0.1)', borderColor: 'rgba(239, 68, 68, 0.3)', color: '#ef4444' }} 
+                        onClick={handleDeleteBooking}
+                      >
+                        Cancel Reservation
+                      </button>
+                    ) : (
+                      <div></div>
+                    )}
+                    <div style={{ display: 'flex', gap: '0.75rem' }}>
+                      <button type="button" className="btn-cancel" onClick={handleCloseModal}>Close</button>
+                      <button type="submit" className="btn-submit-modal">
+                        {isEditMode ? 'Save Changes' : 'Save Booking'}
+                      </button>
+                    </div>
                   </div>
                 </form>
               </div>
