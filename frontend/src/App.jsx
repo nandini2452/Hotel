@@ -587,7 +587,14 @@ function App() {
                       <select
                         className="input-control"
                         value={newBooking.check_in_time}
-                        onChange={e => setNewBooking(prev => ({ ...prev, check_in_time: e.target.value }))}
+                        onChange={e => {
+                          const newTime = e.target.value;
+                          setNewBooking(prev => ({
+                            ...prev,
+                            check_in_time: newTime,
+                            check_out_time: newTime
+                          }));
+                        }}
                         style={{ background: 'rgba(15, 23, 42, 0.85)', color: '#fff' }}
                       >
                         {TIME_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
