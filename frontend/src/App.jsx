@@ -38,7 +38,7 @@ function App() {
     check_in_time: '12:00 PM',
     check_out: '',
     check_out_time: '12:00 PM',
-    status: 'Reserve',
+    status: 'Booked',
     advance_paid: 0,
     advance_status: 'Paid'
   });
@@ -239,7 +239,7 @@ function App() {
       check_in_time: '12:00 PM',
       check_out: checkOutStr,
       check_out_time: '12:00 PM',
-      status: 'Reserve',
+      status: 'Booked',
       advance_paid: room.min_advance,
       advance_status: 'Paid'
     });
@@ -647,7 +647,7 @@ function App() {
                 </div>
                 <div className="legend-item">
                   <div className="legend-color" style={{ background: 'linear-gradient(135deg, #2563eb, #1d4ed8)' }}></div>
-                  <span>Reserve</span>
+                  <span>Booked</span>
                 </div>
                 <div className="legend-item">
                   <div className="legend-color" style={{ background: 'linear-gradient(135deg, #16a34a, #15803d)' }}></div>
@@ -858,7 +858,7 @@ function App() {
                       >
                         <option value="Hold">Hold</option>
                         <option value="Temp Reserve">Temp Reserve</option>
-                        <option value="Reserve">Reserve</option>
+                        <option value="Booked">Booked</option>
                         <option value="Checked-In">Checked-In</option>
                         {isEditMode && <option value="Checked-Out">Checked-Out</option>}
                       </select>

@@ -625,11 +625,11 @@ body {
 }
 .status-temp-reserve .booking-badge { color: #ffedd5; }
 
-.status-reserve .booking-info-block {
+.status-booked .booking-info-block {
   background: linear-gradient(135deg, #2563eb, #1d4ed8);
   border-left: 4px solid #3b82f6;
 }
-.status-reserve .booking-badge { color: #dbeafe; }
+.status-booked .booking-badge { color: #dbeafe; }
 
 .status-checked-in .booking-info-block {
   background: linear-gradient(135deg, #16a34a, #15803d);

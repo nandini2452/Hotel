@@ -114,7 +114,7 @@ class Command(BaseCommand):
             check_in_time="12:00 PM",
             check_out=today + datetime.timedelta(days=2),
             check_out_time="12:00 PM",
-            status="Reserve",
+            status="Booked",
             advance_paid=500.00
         )
         Booking.objects.create(
@@ -159,7 +159,7 @@ class Command(BaseCommand):
             check_in_time="12:00 PM",
             check_out=today + datetime.timedelta(days=3),
             check_out_time="12:00 PM",
-            status="Reserve",
+            status="Booked",
             advance_paid=500.00
         )
         Booking.objects.create(

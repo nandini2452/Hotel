@@ -31,7 +31,7 @@ class Booking(models.Model):
     STATUS_CHOICES = [
         ('Hold', 'Hold'),
         ('Temp Reserve', 'Temp Reserve'),
-        ('Reserve', 'Reserve'),
+        ('Booked', 'Booked'),
         ('Checked-In', 'Checked-In'),
         ('Checked-Out', 'Checked-Out'),
     ]
@@ -44,7 +44,7 @@ class Booking(models.Model):
     check_in_time = models.CharField(max_length=10, default="12:00 PM")
     check_out = models.DateField()
     check_out_time = models.CharField(max_length=10, default="12:00 PM")
-    status = models.CharField(max_length=50, choices=STATUS_CHOICES, default='Reserve')
+    status = models.CharField(max_length=50, choices=STATUS_CHOICES, default='Booked')
     ADVANCE_STATUS_CHOICES = [
         ('Paid', 'Paid'),
         ('Unpaid', 'Unpaid'),

@@ -190,7 +190,7 @@ def my_hotel_bookings(request):
         check_in_time = request.data.get('check_in_time', '12:00 PM')
         check_out = request.data.get('check_out')
         check_out_time = request.data.get('check_out_time', '12:00 PM')
-        status_val = request.data.get('status', 'Reserve')
+        status_val = request.data.get('status', 'Booked')
         advance_paid = request.data.get('advance_paid', 0.00)
         advance_status_val = request.data.get('advance_status', 'Paid')
 
