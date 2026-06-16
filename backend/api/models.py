@@ -10,40 +10,41 @@ class Hotel(models.Model):
     def __str__(self):
         return f"{self.name} ({self.code})"
 
+class RoomType(models.Model):
+    hotel = models.ForeignKey(Hotel, on_delete=models.CASCADE, related_name='room_types')
+    name = models.CharField(max_length=100)
+    price = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+
+    class Meta:
+        unique_together = ('hotel', 'name')
+
+    def __str__(self):
+        return f"{self.name} - {self.hotel.name} (₹{self.price})"
+
 class Room(models.Model):
-    ROOM_TYPES = [
-        ('Standard', 'Standard'),
-        ('Deluxe', 'Deluxe'),
-        ('Superior', 'Superior'),
-    ]
     hotel = models.ForeignKey(Hotel, on_delete=models.CASCADE, related_name='rooms')
     number = models.CharField(max_length=50)
-    room_type = models.CharField(max_length=50, choices=ROOM_TYPES)
-    price = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    room_type = models.ForeignKey(RoomType, on_delete=models.CASCADE, related_name='rooms')
 
     class Meta:
         unique_together = ('hotel', 'number')
 
     def __str__(self):
-        return f"{self.number} ({self.room_type}) - {self.hotel.name}"
+        return f"{self.number} ({self.room_type.name}) - {self.hotel.name}"
 
 class Booking(models.Model):
     STATUS_CHOICES = [
-        ('Hold', 'Hold'),
-        ('Temp Reserve', 'Temp Reserve'),
         ('Booked', 'Booked'),
-        ('Checked-In', 'Checked-In'),
-        ('Checked-Out', 'Checked-Out'),
+        ('Checked_in', 'Checked_in'),
+        ('dirty', 'dirty'),
     ]
     room = models.ForeignKey(Room, on_delete=models.CASCADE, related_name='bookings')
     guest_first_name = models.CharField(max_length=100)
     guest_last_name = models.CharField(max_length=100)
     guest_phone = models.CharField(max_length=20)
     guest_email = models.EmailField(blank=True, null=True)
-    check_in = models.DateField()
-    check_in_time = models.CharField(max_length=10, default="12:00 PM")
-    check_out = models.DateField()
-    check_out_time = models.CharField(max_length=10, default="12:00 PM")
+    check_in = models.DateTimeField()
+    check_out = models.DateTimeField()
     status = models.CharField(max_length=50, choices=STATUS_CHOICES, default='Booked')
     ADVANCE_STATUS_CHOICES = [
         ('Paid', 'Paid'),
@@ -53,5 +54,5 @@ class Booking(models.Model):
     advance_status = models.CharField(max_length=20, choices=ADVANCE_STATUS_CHOICES, default='Paid')
 
     def __str__(self):
-        return f"{self.guest_first_name} {self.guest_last_name} - Room {self.room.number} ({self.check_in} {self.check_in_time} to {self.check_out} {self.check_out_time}) - Advance: {self.advance_status}"
+        return f"{self.guest_first_name} {self.guest_last_name} - Room {self.room.number} ({self.check_in} to {self.check_out}) - Status: {self.status}"
 

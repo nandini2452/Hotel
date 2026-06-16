@@ -7,7 +7,8 @@ from django.contrib.auth import authenticate
 from rest_framework.authtoken.models import Token
 from django.contrib.auth.models import User
 from django.db.models import Q
-from .models import Hotel, Room, Booking
+from django.utils import timezone
+from .models import Hotel, RoomType, Room, Booking
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
@@ -111,25 +112,30 @@ def my_hotel_rooms(request):
     if not (is_owner or is_manager):
         return Response({"detail": "Not authorized for this hotel."}, status=status.HTTP_403_FORBIDDEN)
 
-    rooms = hotel.rooms.all().order_by('room_type', 'number')
+    rooms = hotel.rooms.all().order_by('room_type__name', 'number')
     data = []
     for r in rooms:
+        room_type_name = r.room_type.name
         min_advance = 0.00
-        if r.room_type == 'Standard':
+        if room_type_name == 'Standard':
             min_advance = 500.00
-        elif r.room_type == 'Deluxe':
+        elif room_type_name == 'Deluxe':
             min_advance = 1000.00
-        elif r.room_type == 'Superior':
+        elif room_type_name == 'Superior':
             min_advance = 2000.00
             
         data.append({
             "id": r.id,
             "number": r.number,
-            "room_type": r.room_type,
-            "price": r.price,
+            "room_type": room_type_name,
+            "price": r.room_type.price,
             "min_advance": min_advance
         })
     return Response(data, status=status.HTTP_200_OK)
+
+def combine_datetime(date_str, time_str):
+    dt_naive = datetime.datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %I:%M %p")
+    return timezone.make_aware(dt_naive)
 
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])
@@ -160,19 +166,21 @@ def my_hotel_bookings(request):
         bookings = Booking.objects.filter(room__hotel=hotel)
         data = []
         for b in bookings:
+            local_in = timezone.localtime(b.check_in)
+            local_out = timezone.localtime(b.check_out)
             data.append({
                 "id": b.id,
                 "room_id": b.room.id,
                 "room_number": b.room.number,
-                "room_type": b.room.room_type,
+                "room_type": b.room.room_type.name,
                 "guest_first_name": b.guest_first_name,
                 "guest_last_name": b.guest_last_name,
                 "guest_phone": b.guest_phone,
                 "guest_email": b.guest_email,
-                "check_in": b.check_in.strftime('%Y-%m-%d'),
-                "check_in_time": b.check_in_time,
-                "check_out": b.check_out.strftime('%Y-%m-%d'),
-                "check_out_time": b.check_out_time,
+                "check_in": local_in.strftime('%Y-%m-%d'),
+                "check_in_time": local_in.strftime('%I:%M %p'),
+                "check_out": local_out.strftime('%Y-%m-%d'),
+                "check_out_time": local_out.strftime('%I:%M %p'),
                 "status": b.status,
                 "advance_paid": b.advance_paid,
                 "advance_status": b.advance_status
@@ -187,9 +195,9 @@ def my_hotel_bookings(request):
         guest_phone = request.data.get('guest_phone')
         guest_email = request.data.get('guest_email')
         check_in = request.data.get('check_in')
-        check_in_time = request.data.get('check_in_time', '12:00 PM')
+        check_in_time = '11:30 AM'
         check_out = request.data.get('check_out')
-        check_out_time = request.data.get('check_out_time', '12:00 PM')
+        check_out_time = '11:30 AM'
         status_val = request.data.get('status', 'Booked')
         advance_paid = request.data.get('advance_paid', 0.00)
         advance_status_val = request.data.get('advance_status', 'Paid')
@@ -213,24 +221,25 @@ def my_hotel_bookings(request):
         if not (is_owner or is_manager):
             return Response({"detail": "Not authorized for this hotel."}, status=status.HTTP_403_FORBIDDEN)
 
-        # Parse check-in/check-out date strings
+        # Parse check-in/check-out date strings & times
         try:
-            check_in_date = datetime.datetime.strptime(check_in, '%Y-%m-%d').date()
-            check_out_date = datetime.datetime.strptime(check_out, '%Y-%m-%d').date()
+            check_in_dt = combine_datetime(check_in, check_in_time)
+            check_out_dt = combine_datetime(check_out, check_out_time)
         except ValueError:
-            return Response({"detail": "Invalid check-in or check-out date format. Use YYYY-MM-DD."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": "Invalid check-in or check-out date/time format. Use YYYY-MM-DD and hh:mm AM/PM."}, status=status.HTTP_400_BAD_REQUEST)
 
-        if check_in_date >= check_out_date:
-            return Response({"detail": "Check-out date must be after check-in date."}, status=status.HTTP_400_BAD_REQUEST)
+        if check_in_dt >= check_out_dt:
+            return Response({"detail": "Check-out date/time must be after check-in date/time."}, status=status.HTTP_400_BAD_REQUEST)
 
         # Validate advance paid
         # Standard: 500, Deluxe: 1000, Superior: 2000
+        room_type_name = room.room_type.name
         min_advance = 0.00
-        if room.room_type == 'Standard':
+        if room_type_name == 'Standard':
             min_advance = 500.00
-        elif room.room_type == 'Deluxe':
+        elif room_type_name == 'Deluxe':
             min_advance = 1000.00
-        elif room.room_type == 'Superior':
+        elif room_type_name == 'Superior':
             min_advance = 2000.00
 
         try:
@@ -242,13 +251,13 @@ def my_hotel_bookings(request):
             advance_paid_dec = 0.00
         else:
             if advance_paid_dec < min_advance:
-                return Response({"detail": f"Minimum advance payment of ₹{min_advance} is required for {room.room_type} rooms."}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"detail": f"Minimum advance payment of ₹{min_advance} is required for {room_type_name} rooms."}, status=status.HTTP_400_BAD_REQUEST)
 
         # Check for booking overlaps
         overlapping_bookings = Booking.objects.filter(
             room=room,
-            check_in__lt=check_out_date,
-            check_out__gt=check_in_date
+            check_in__lt=check_out_dt,
+            check_out__gt=check_in_dt
         )
         if overlapping_bookings.exists():
             return Response({"detail": "This room is already booked for the selected dates."}, status=status.HTTP_400_BAD_REQUEST)
@@ -259,28 +268,28 @@ def my_hotel_bookings(request):
             guest_last_name=guest_last_name,
             guest_phone=guest_phone,
             guest_email=guest_email,
-            check_in=check_in_date,
-            check_in_time=check_in_time,
-            check_out=check_out_date,
-            check_out_time=check_out_time,
+            check_in=check_in_dt,
+            check_out=check_out_dt,
             status=status_val,
             advance_paid=advance_paid_dec,
             advance_status=advance_status_val
         )
 
+        local_in = timezone.localtime(booking.check_in)
+        local_out = timezone.localtime(booking.check_out)
         return Response({
             "id": booking.id,
             "room_id": booking.room.id,
             "room_number": booking.room.number,
-            "room_type": booking.room.room_type,
+            "room_type": booking.room.room_type.name,
             "guest_first_name": booking.guest_first_name,
             "guest_last_name": booking.guest_last_name,
             "guest_phone": booking.guest_phone,
             "guest_email": booking.guest_email,
-            "check_in": booking.check_in.strftime('%Y-%m-%d'),
-            "check_in_time": booking.check_in_time,
-            "check_out": booking.check_out.strftime('%Y-%m-%d'),
-            "check_out_time": booking.check_out_time,
+            "check_in": local_in.strftime('%Y-%m-%d'),
+            "check_in_time": local_in.strftime('%I:%M %p'),
+            "check_out": local_out.strftime('%Y-%m-%d'),
+            "check_out_time": local_out.strftime('%I:%M %p'),
             "status": booking.status,
             "advance_paid": booking.advance_paid,
             "advance_status": booking.advance_status
@@ -310,9 +319,9 @@ def my_hotel_booking_detail(request, pk):
         guest_phone = request.data.get('guest_phone')
         guest_email = request.data.get('guest_email')
         check_in = request.data.get('check_in')
-        check_in_time = request.data.get('check_in_time')
+        check_in_time = '11:30 AM'
         check_out = request.data.get('check_out')
-        check_out_time = request.data.get('check_out_time')
+        check_out_time = '11:30 AM'
         status_val = request.data.get('status')
         advance_paid = request.data.get('advance_paid')
         advance_status_val = request.data.get('advance_status')
@@ -333,35 +342,37 @@ def my_hotel_booking_detail(request, pk):
         if advance_status_val:
             booking.advance_status = advance_status_val
 
-        if check_in or check_out:
-            cin_str = check_in or booking.check_in.strftime('%Y-%m-%d')
-            cout_str = check_out or booking.check_out.strftime('%Y-%m-%d')
-            try:
-                check_in_date = datetime.datetime.strptime(cin_str, '%Y-%m-%d').date()
-                check_out_date = datetime.datetime.strptime(cout_str, '%Y-%m-%d').date()
-            except ValueError:
-                return Response({"detail": "Invalid date format. Use YYYY-MM-DD."}, status=status.HTTP_400_BAD_REQUEST)
+        # Get local versions to combine if check_in/check_out or times are updated
+        local_in = timezone.localtime(booking.check_in)
+        local_out = timezone.localtime(booking.check_out)
 
-            if check_in_date >= check_out_date:
-                return Response({"detail": "Check-out date must be after check-in date."}, status=status.HTTP_400_BAD_REQUEST)
+        cin_date_str = check_in or local_in.strftime('%Y-%m-%d')
+        cin_time_str = check_in_time or local_in.strftime('%I:%M %p')
+        cout_date_str = check_out or local_out.strftime('%Y-%m-%d')
+        cout_time_str = check_out_time or local_out.strftime('%I:%M %p')
 
-            overlapping_bookings = Booking.objects.filter(
-                room=booking.room,
-                check_in__lt=check_out_date,
-                check_out__gt=check_in_date
-            ).exclude(id=booking.id)
+        try:
+            check_in_dt = combine_datetime(cin_date_str, cin_time_str)
+            check_out_dt = combine_datetime(cout_date_str, cout_time_str)
+        except ValueError:
+            return Response({"detail": "Invalid date or time format."}, status=status.HTTP_400_BAD_REQUEST)
 
-            if overlapping_bookings.exists():
-                return Response({"detail": "This room is already booked for the selected dates."}, status=status.HTTP_400_BAD_REQUEST)
+        if check_in_dt >= check_out_dt:
+            return Response({"detail": "Check-out date/time must be after check-in date/time."}, status=status.HTTP_400_BAD_REQUEST)
 
-            booking.check_in = check_in_date
-            booking.check_out = check_out_date
+        overlapping_bookings = Booking.objects.filter(
+            room=booking.room,
+            check_in__lt=check_out_dt,
+            check_out__gt=check_in_dt
+        ).exclude(id=booking.id)
 
-        if check_in_time:
-            booking.check_in_time = check_in_time
-        if check_out_time:
-            booking.check_out_time = check_out_time
+        if overlapping_bookings.exists():
+            return Response({"detail": "This room is already booked for the selected dates."}, status=status.HTTP_400_BAD_REQUEST)
 
+        booking.check_in = check_in_dt
+        booking.check_out = check_out_dt
+
+        room_type_name = booking.room.room_type.name
         if advance_status_val == 'Unpaid':
             booking.advance_paid = 0.00
         elif advance_status_val == 'Paid' or advance_paid is not None:
@@ -373,31 +384,34 @@ def my_hotel_booking_detail(request, pk):
 
             if booking.advance_status == 'Paid':
                 min_advance = 0.00
-                if booking.room.room_type == 'Standard':
+                if room_type_name == 'Standard':
                     min_advance = 500.00
-                elif booking.room.room_type == 'Deluxe':
+                elif room_type_name == 'Deluxe':
                     min_advance = 1000.00
-                elif booking.room.room_type == 'Superior':
+                elif room_type_name == 'Superior':
                     min_advance = 2000.00
 
                 if advance_paid_dec < min_advance:
-                    return Response({"detail": f"Minimum advance payment of ₹{min_advance} is required for {booking.room.room_type} rooms."}, status=status.HTTP_400_BAD_REQUEST)
+                    return Response({"detail": f"Minimum advance payment of ₹{min_advance} is required for {room_type_name} rooms."}, status=status.HTTP_400_BAD_REQUEST)
             booking.advance_paid = advance_paid_dec
 
         booking.save()
+
+        local_in_new = timezone.localtime(booking.check_in)
+        local_out_new = timezone.localtime(booking.check_out)
         return Response({
             "id": booking.id,
             "room_id": booking.room.id,
             "room_number": booking.room.number,
-            "room_type": booking.room.room_type,
+            "room_type": booking.room.room_type.name,
             "guest_first_name": booking.guest_first_name,
             "guest_last_name": booking.guest_last_name,
             "guest_phone": booking.guest_phone,
             "guest_email": booking.guest_email,
-            "check_in": booking.check_in.strftime('%Y-%m-%d'),
-            "check_in_time": booking.check_in_time,
-            "check_out": booking.check_out.strftime('%Y-%m-%d'),
-            "check_out_time": booking.check_out_time,
+            "check_in": local_in_new.strftime('%Y-%m-%d'),
+            "check_in_time": local_in_new.strftime('%I:%M %p'),
+            "check_out": local_out_new.strftime('%Y-%m-%d'),
+            "check_out_time": local_out_new.strftime('%I:%M %p'),
             "status": booking.status,
             "advance_paid": booking.advance_paid,
             "advance_status": booking.advance_status

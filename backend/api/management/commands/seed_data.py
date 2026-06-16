@@ -1,10 +1,11 @@
 from django.core.management.base import BaseCommand
 from django.contrib.auth.models import User
-from api.models import Hotel, Room, Booking
+from django.utils import timezone
+from api.models import Hotel, RoomType, Room, Booking
 import datetime
 
 class Command(BaseCommand):
-    help = 'Seeds admin, owner, 4 managers, and 2 hotels into the database.'
+    help = 'Seeds admin, owner, 4 managers, and 2 hotels into the database with updated RoomType and DateTime checks.'
 
     def handle(self, *args, **options):
         self.stdout.write('Seeding data with 1 Admin, 1 Owner, 4 custom Managers, and 2 Hotels...')
@@ -66,42 +67,56 @@ class Command(BaseCommand):
         self.stdout.write(f"Seeded Hotel: {hotel_b.name} (Code: {hotel_b.code}) with managers C & D")
 
         # Clear existing Rooms and Bookings to prevent duplicates
+        RoomType.objects.all().delete()
         Room.objects.all().delete()
         Booking.objects.all().delete()
-        self.stdout.write('Cleared previous room and booking entries.')
+        self.stdout.write('Cleared previous RoomTypes, rooms, and booking entries.')
 
-        def seed_rooms_for_hotel(hotel):
+        # Create Room Types for Hotel A and Hotel B
+        def seed_room_types_for_hotel(hotel):
+            std = RoomType.objects.create(hotel=hotel, name="Standard", price=1500.00)
+            dlx = RoomType.objects.create(hotel=hotel, name="Deluxe", price=2500.00)
+            sup = RoomType.objects.create(hotel=hotel, name="Superior", price=4000.00)
+            return {"Standard": std, "Deluxe": dlx, "Superior": sup}
+
+        types_a = seed_room_types_for_hotel(hotel_a)
+        types_b = seed_room_types_for_hotel(hotel_b)
+        self.stdout.write("Seeded RoomTypes (Standard, Deluxe, Superior) for both hotels.")
+
+        def seed_rooms_for_hotel(hotel, types_dict):
             rooms_list = []
             # Standard: STD-101 to STD-105
             for i in range(101, 106):
                 rooms_list.append(Room.objects.create(
                     hotel=hotel,
                     number=f"STD-{i}",
-                    room_type="Standard",
-                    price=1500.00
+                    room_type=types_dict["Standard"]
                 ))
             # Deluxe: DLX-116 to DLX-120
             for i in range(116, 121):
                 rooms_list.append(Room.objects.create(
                     hotel=hotel,
                     number=f"DLX-{i}",
-                    room_type="Deluxe",
-                    price=2500.00
+                    room_type=types_dict["Deluxe"]
                 ))
             # Superior: SUP-131 to SUP-133
             for i in range(131, 134):
                 rooms_list.append(Room.objects.create(
                     hotel=hotel,
                     number=f"SUP-{i}",
-                    room_type="Superior",
-                    price=4000.00
+                    room_type=types_dict["Superior"]
                 ))
             return rooms_list
 
-        today = datetime.date.today()
+        today = timezone.localdate()
+
+        def make_dt(date_val, time_str="11:30 AM"):
+            t = datetime.datetime.strptime(time_str, "%I:%M %p").time()
+            dt = datetime.datetime.combine(date_val, t)
+            return timezone.make_aware(dt)
 
         # Seed rooms and bookings for hotel_a
-        rooms_a = seed_rooms_for_hotel(hotel_a)
+        rooms_a = seed_rooms_for_hotel(hotel_a, types_a)
         self.stdout.write(f"Seeded 13 rooms for {hotel_a.name}")
         
         Booking.objects.create(
@@ -110,12 +125,11 @@ class Command(BaseCommand):
             guest_last_name="Kumar",
             guest_phone="9876543210",
             guest_email="ramesh@example.com",
-            check_in=today,
-            check_in_time="12:00 PM",
-            check_out=today + datetime.timedelta(days=2),
-            check_out_time="12:00 PM",
+            check_in=make_dt(today),
+            check_out=make_dt(today + datetime.timedelta(days=2)),
             status="Booked",
-            advance_paid=500.00
+            advance_paid=500.00,
+            advance_status="Paid"
         )
         Booking.objects.create(
             room=rooms_a[5],  # DLX-116
@@ -123,30 +137,28 @@ class Command(BaseCommand):
             guest_last_name="Sharma",
             guest_phone="9876543211",
             guest_email="priya@example.com",
-            check_in=today + datetime.timedelta(days=1),
-            check_in_time="12:00 PM",
-            check_out=today + datetime.timedelta(days=4),
-            check_out_time="12:00 PM",
-            status="Checked-In",
-            advance_paid=1000.00
+            check_in=make_dt(today + datetime.timedelta(days=1)),
+            check_out=make_dt(today + datetime.timedelta(days=4)),
+            status="Checked_in",
+            advance_paid=1000.00,
+            advance_status="Paid"
         )
+        # Seed a dirty room to verify the cleaning interface works out of the box
         Booking.objects.create(
             room=rooms_a[10],  # SUP-131
             guest_first_name="Amit",
             guest_last_name="Patel",
             guest_phone="9876543212",
             guest_email="amit@example.com",
-            check_in=today + datetime.timedelta(days=3),
-            check_in_time="12:00 PM",
-            check_out=today + datetime.timedelta(days=6),
-            check_out_time="12:00 PM",
-            status="Hold",
+            check_in=make_dt(today - datetime.timedelta(days=2)),
+            check_out=make_dt(today),
+            status="dirty",
             advance_paid=0.00,
             advance_status="Unpaid"
         )
 
         # Seed rooms and bookings for hotel_b
-        rooms_b = seed_rooms_for_hotel(hotel_b)
+        rooms_b = seed_rooms_for_hotel(hotel_b, types_b)
         self.stdout.write(f"Seeded 13 rooms for {hotel_b.name}")
 
         Booking.objects.create(
@@ -155,12 +167,11 @@ class Command(BaseCommand):
             guest_last_name="Raina",
             guest_phone="9876543213",
             guest_email="suresh@example.com",
-            check_in=today,
-            check_in_time="12:00 PM",
-            check_out=today + datetime.timedelta(days=3),
-            check_out_time="12:00 PM",
+            check_in=make_dt(today),
+            check_out=make_dt(today + datetime.timedelta(days=3)),
             status="Booked",
-            advance_paid=500.00
+            advance_paid=500.00,
+            advance_status="Paid"
         )
         Booking.objects.create(
             room=rooms_b[6],  # DLX-117
@@ -168,12 +179,11 @@ class Command(BaseCommand):
             guest_last_name="Devi",
             guest_phone="9876543214",
             guest_email="anjali@example.com",
-            check_in=today + datetime.timedelta(days=2),
-            check_in_time="12:00 PM",
-            check_out=today + datetime.timedelta(days=5),
-            check_out_time="12:00 PM",
-            status="Checked-In",
-            advance_paid=1500.00
+            check_in=make_dt(today + datetime.timedelta(days=2)),
+            check_out=make_dt(today + datetime.timedelta(days=5)),
+            status="Checked_in",
+            advance_paid=1500.00,
+            advance_status="Paid"
         )
 
         self.stdout.write(self.style.SUCCESS('Seeding complete!'))

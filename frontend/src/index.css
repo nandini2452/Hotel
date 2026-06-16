@@ -631,11 +631,26 @@ body {
 }
 .status-booked .booking-badge { color: #dbeafe; }
 
-.status-checked-in .booking-info-block {
+.status-checked-in .booking-info-block,
+.status-checked_in .booking-info-block {
   background: linear-gradient(135deg, #16a34a, #15803d);
   border-left: 4px solid #22c55e;
 }
-.status-checked-in .booking-badge { color: #dcfce7; }
+.status-checked-in .booking-badge,
+.status-checked_in .booking-badge { color: #dcfce7; }
+
+.status-dirty .booking-info-block {
+  background: repeating-linear-gradient(
+    45deg,
+    #374151,
+    #374151 10px,
+    #1f2937 10px,
+    #1f2937 20px
+  );
+  border-left: 4px solid #9ca3af;
+}
+.status-dirty .booking-badge { color: #f3f4f6; }
+
 
 
 /* Modal Styles */

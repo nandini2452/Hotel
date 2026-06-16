@@ -35,9 +35,9 @@ function App() {
     guest_phone: '',
     guest_email: '',
     check_in: '',
-    check_in_time: '12:00 PM',
+    check_in_time: '11:30 AM',
     check_out: '',
-    check_out_time: '12:00 PM',
+    check_out_time: '11:30 AM',
     status: 'Booked',
     advance_paid: 0,
     advance_status: 'Paid'
@@ -236,9 +236,9 @@ function App() {
       guest_phone: '',
       guest_email: '',
       check_in: checkInStr,
-      check_in_time: '12:00 PM',
+      check_in_time: '11:30 AM',
       check_out: checkOutStr,
-      check_out_time: '12:00 PM',
+      check_out_time: '11:30 AM',
       status: 'Booked',
       advance_paid: room.min_advance,
       advance_status: 'Paid'
@@ -262,9 +262,9 @@ function App() {
       guest_phone: booking.guest_phone,
       guest_email: booking.guest_email || '',
       check_in: booking.check_in,
-      check_in_time: booking.check_in_time || '12:00 PM',
+      check_in_time: booking.check_in_time || '11:30 AM',
       check_out: booking.check_out,
-      check_out_time: booking.check_out_time || '12:00 PM',
+      check_out_time: booking.check_out_time || '11:30 AM',
       status: booking.status,
       advance_paid: booking.advance_paid,
       advance_status: booking.advance_status || 'Paid'
@@ -273,7 +273,7 @@ function App() {
   };
 
   const isCheckoutPassed = (booking) => {
-    if (booking.status !== 'Checked-In') return false;
+    if (booking.status !== 'Checked_in') return false;
     if (!booking.check_out) return false;
     
     try {
@@ -458,7 +458,12 @@ function App() {
   };
 
   const handleDeleteBooking = () => {
-    if (!window.confirm('Are you sure you want to cancel this reservation?')) return;
+    const isDirty = newBooking.status === 'dirty';
+    const confirmMsg = isDirty 
+      ? 'Are you sure you want to mark this room as cleaned and vacate it?' 
+      : 'Are you sure you want to cancel this reservation?';
+    
+    if (!window.confirm(confirmMsg)) return;
     
     fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/${editingBookingId}/`, {
       method: 'DELETE',
@@ -469,11 +474,11 @@ function App() {
       .then(async res => {
         if (!res.ok) {
           const data = await res.json();
-          throw new Error(data.detail || 'Failed to cancel reservation');
+          throw new Error(data.detail || 'Failed to process request');
         }
       })
       .then(() => {
-        triggerToast('Reservation cancelled successfully!');
+        triggerToast(isDirty ? 'Room marked as cleaned and vacated!' : 'Reservation cancelled successfully!');
         // Refresh bookings
         fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/?hotel_code=${hotelCode}`, {
           headers: { 'Authorization': `Token ${token}` }
@@ -485,7 +490,7 @@ function App() {
       })
       .catch(err => {
         console.error(err);
-        triggerToast(err.message || 'Error occurred while cancelling reservation.');
+        triggerToast(err.message || 'Error occurred while processing request.');
       });
   };
 
@@ -495,12 +500,11 @@ function App() {
     let i = 0;
     while (i < 14) {
       const dateStr = formatDate(dates[i]);
-      // Find booking covering dateStr (excluding Checked-Out bookings)
+      // Find booking covering dateStr
       const booking = bookings.find(b => 
         Number(b.room_id) === Number(room.id) && 
         b.check_in <= dateStr && 
-        b.check_out > dateStr &&
-        b.status !== 'Checked-Out'
+        b.check_out > dateStr
       );
       
       if (booking) {
@@ -537,7 +541,9 @@ function App() {
                   <span className="booking-edit-indicator" title="Click to Edit" style={{ fontSize: '0.75rem', opacity: 0.6 }}>✏️</span>
                 </div>
                 <div className="booking-footer-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', marginTop: '4px' }}>
-                  <span className="booking-badge">{booking.status}</span>
+                  <span className="booking-badge">
+                    {booking.status === 'dirty' ? '🧹 Needs Cleaning' : booking.status === 'Checked_in' ? 'Checked-In' : booking.status}
+                  </span>
                   <span className="booking-advance" style={booking.advance_status === 'Unpaid' ? { color: '#f87171', fontSize: '0.65rem', fontWeight: 'bold' } : {}}>
                     {booking.advance_status === 'Unpaid' ? 'Incomplete Advance' : `₹${parseFloat(booking.advance_paid).toLocaleString('en-IN')}`}
                   </span>
@@ -638,20 +644,19 @@ function App() {
               <h2>Front Desk Booking Calendar Grid</h2>
               <div className="calendar-legend">
                 <div className="legend-item">
-                  <div className="legend-color" style={{ background: 'linear-gradient(135deg, #d97706, #b45309)' }}></div>
-                  <span>Hold</span>
-                </div>
-                <div className="legend-item">
-                  <div className="legend-color" style={{ background: 'linear-gradient(135deg, #ea580c, #c2410c)' }}></div>
-                  <span>Temp Reserve</span>
-                </div>
-                <div className="legend-item">
                   <div className="legend-color" style={{ background: 'linear-gradient(135deg, #2563eb, #1d4ed8)' }}></div>
                   <span>Booked</span>
                 </div>
                 <div className="legend-item">
                   <div className="legend-color" style={{ background: 'linear-gradient(135deg, #16a34a, #15803d)' }}></div>
                   <span>Checked-In</span>
+                </div>
+                <div className="legend-item">
+                  <div className="legend-color" style={{
+                    background: 'repeating-linear-gradient(45deg, #374151, #374151 4px, #1f2937 4px, #1f2937 8px)',
+                    border: '1px solid #9ca3af'
+                  }}></div>
+                  <span>🧹 Needs Cleaning</span>
                 </div>
               </div>
             </div>
@@ -735,6 +740,27 @@ function App() {
                 </div>
                 
                 <form onSubmit={handleCreateBooking}>
+                  {isEditMode && newBooking.status === 'dirty' && (
+                    <div className="warning-banner" style={{
+                      background: 'rgba(239, 68, 68, 0.1)',
+                      border: '1px solid rgba(239, 68, 68, 0.3)',
+                      color: '#f87171',
+                      padding: '10px 12px',
+                      borderRadius: '6px',
+                      marginBottom: '16px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      fontSize: '0.9rem',
+                      width: '100%',
+                      boxSizing: 'border-box'
+                    }}>
+                      <span>🧹</span>
+                      <div>
+                        <strong>Needs Cleaning:</strong> This room has been checked out and needs cleaning before new reservations.
+                      </div>
+                    </div>
+                  )}
                   <div className="room-summary-box">
                     <h4>Room: {selectedRoom?.number} ({selectedRoom?.room_type})</h4>
                     <div className="summary-grid">
@@ -796,8 +822,8 @@ function App() {
                     </div>
                     
                     {/* Check-in group */}
-                    <div className="form-group">
-                      <label className="form-label">Check-In Date</label>
+                    <div className="form-group col-span-2">
+                      <label className="form-label">Check-In Date (Fixed Check-in: 11:30 AM)</label>
                       <input
                         type="date"
                         className="input-control"
@@ -806,28 +832,10 @@ function App() {
                         onChange={e => setNewBooking(prev => ({ ...prev, check_in: e.target.value }))}
                       />
                     </div>
-                    <div className="form-group">
-                      <label className="form-label">Check-In Time</label>
-                      <select
-                        className="input-control"
-                        value={newBooking.check_in_time}
-                        onChange={e => {
-                          const newTime = e.target.value;
-                          setNewBooking(prev => ({
-                            ...prev,
-                            check_in_time: newTime,
-                            check_out_time: newTime
-                          }));
-                        }}
-                        style={{ background: 'rgba(15, 23, 42, 0.85)', color: '#fff' }}
-                      >
-                        {TIME_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-                      </select>
-                    </div>
 
                     {/* Check-out group */}
-                    <div className="form-group">
-                      <label className="form-label">Check-Out Date</label>
+                    <div className="form-group col-span-2">
+                      <label className="form-label">Check-Out Date (Fixed Check-out: 11:30 AM)</label>
                       <input
                         type="date"
                         className="input-control"
@@ -835,17 +843,6 @@ function App() {
                         value={newBooking.check_out}
                         onChange={e => setNewBooking(prev => ({ ...prev, check_out: e.target.value }))}
                       />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">Check-Out Time</label>
-                      <select
-                        className="input-control"
-                        value={newBooking.check_out_time}
-                        onChange={e => setNewBooking(prev => ({ ...prev, check_out_time: e.target.value }))}
-                        style={{ background: 'rgba(15, 23, 42, 0.85)', color: '#fff' }}
-                      >
-                        {TIME_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-                      </select>
                     </div>
 
                     <div className="form-group">
@@ -856,11 +853,9 @@ function App() {
                         onChange={e => setNewBooking(prev => ({ ...prev, status: e.target.value }))}
                         style={{ background: 'rgba(15, 23, 42, 0.85)', color: '#fff' }}
                       >
-                        <option value="Hold">Hold</option>
-                        <option value="Temp Reserve">Temp Reserve</option>
                         <option value="Booked">Booked</option>
-                        <option value="Checked-In">Checked-In</option>
-                        {isEditMode && <option value="Checked-Out">Checked-Out</option>}
+                        <option value="Checked_in">Checked-In</option>
+                        <option value="dirty">Dirty (Needs Cleaning)</option>
                       </select>
                     </div>
                     <div className="form-group">
@@ -902,11 +897,11 @@ function App() {
                     {isEditMode ? (
                       <button 
                         type="button" 
-                        className="btn-cancel" 
-                        style={{ background: 'rgba(239, 68, 68, 0.1)', borderColor: 'rgba(239, 68, 68, 0.3)', color: '#ef4444' }} 
+                        className={newBooking.status === 'dirty' ? 'btn-submit-modal' : 'btn-cancel'}
+                        style={newBooking.status === 'dirty' ? { background: 'rgba(34, 197, 94, 0.1)', borderColor: 'rgba(34, 197, 94, 0.3)', color: '#22c55e' } : { background: 'rgba(239, 68, 68, 0.1)', borderColor: 'rgba(239, 68, 68, 0.3)', color: '#ef4444' }} 
                         onClick={handleDeleteBooking}
                       >
-                        Cancel Reservation
+                        {newBooking.status === 'dirty' ? '🧹 Mark as Cleaned (Vacate Room)' : 'Cancel Reservation'}
                       </button>
                     ) : (
                       <div></div>
