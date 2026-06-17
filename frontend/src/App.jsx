@@ -343,19 +343,10 @@ function App() {
     setSelectedBooking(null);
   };
 
-  const refreshRoomsList = () => {
-    if (!token || !hotelCode) return;
-    fetch(`http://127.0.0.1:8000/api/my-hotel/rooms/?hotel_code=${hotelCode}&_t=${Date.now()}`, {
-      headers: { 'Authorization': `Token ${token}` }
-    })
-      .then(res => res.json())
-      .then(data => setRooms(data))
-      .catch(err => console.error(err));
-  };
+  // Helper to refresh bookings state
 
   const refreshBookings = (activeBookingId = null) => {
     const targetId = activeBookingId || (selectedBooking ? selectedBooking.id : null);
-    refreshRoomsList();
     fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/?hotel_code=${hotelCode}&_t=${Date.now()}`, {
       headers: { 'Authorization': `Token ${token}` }
     })
@@ -989,106 +980,7 @@ function App() {
     }
   };
 
-  const handleToggleCleanliness = async (booking) => {
-    if (!booking) return;
-    
-    const todayStr = formatDate(new Date());
-    let newStatus = 'dirty';
-    if (booking.status === 'dirty') {
-      newStatus = booking.check_in <= todayStr ? 'Checked_in' : 'Booked';
-    } else {
-      newStatus = 'dirty';
-    }
-
-    if (!window.confirm(`Are you sure you want to mark Room ${booking.room_number || ''} as ${newStatus === 'dirty' ? 'Dirty (Needs Cleaning)' : 'Clean'}?`)) return;
-
-    try {
-      const res = await fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/${booking.id}/`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Token ${token}`
-        },
-        body: JSON.stringify({ status: newStatus })
-      });
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.detail || 'Failed to update status');
-      }
-      const updated = await res.json();
-      triggerToast(`Room status updated to ${newStatus === 'dirty' ? 'Dirty' : 'Clean'}!`);
-      if (selectedBooking && selectedBooking.id === updated.id) {
-        setSelectedBooking(updated);
-      }
-      setBookings(prev => prev.map(b => b.id === updated.id ? updated : b));
-      refreshBookings(updated.id);
-    } catch (err) {
-      triggerToast(err.message);
-    }
-  };
-
-  const handleToggleRoomCleanliness = async (room) => {
-    if (!room) return;
-    const newCleanliness = room.cleanliness === 'dirty' ? 'clean' : 'dirty';
-    if (!window.confirm(`Are you sure you want to mark Room ${room.number} as ${newCleanliness === 'clean' ? 'Clean' : 'Dirty (Needs Cleaning)'}?`)) return;
-
-    try {
-      const res = await fetch(`http://127.0.0.1:8000/api/my-hotel/rooms/${room.id}/`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Token ${token}`
-        },
-        body: JSON.stringify({ cleanliness: newCleanliness })
-      });
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.detail || 'Failed to update room cleanliness');
-      }
-      const updated = await res.json();
-      triggerToast(`Room ${room.number} cleanliness set to ${newCleanliness === 'clean' ? 'Clean' : 'Dirty'}!`);
-      
-      // Update room in state
-      setRooms(prev => prev.map(r => r.id === room.id ? { ...r, cleanliness: newCleanliness } : r));
-      
-      // Sync bookings list because backend view synced any active booking
-      fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/?hotel_code=${hotelCode}`, {
-        headers: { 'Authorization': `Token ${token}` }
-      })
-        .then(res => res.json())
-        .then(data => setBookings(data));
-        
-    } catch (err) {
-      triggerToast(err.message);
-    }
-  };
-
-  const renderRoomCleanlinessEmoji = (room) => {
-    const isDirty = room.cleanliness === 'dirty';
-    return (
-      <span 
-        style={{ 
-          cursor: 'pointer', 
-          fontSize: '1.1rem', 
-          padding: '2px 6px', 
-          borderRadius: '4px',
-          background: isDirty ? 'rgba(239, 68, 68, 0.15)' : 'rgba(34, 197, 94, 0.15)',
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          transition: 'transform 0.15s ease',
-          marginLeft: '8px'
-        }}
-        title={isDirty ? "Room is Dirty. Click to mark as Clean!" : "Room is Clean. Click to mark as Dirty!"}
-        onClick={(e) => {
-          e.stopPropagation();
-          handleToggleRoomCleanliness(room);
-        }}
-      >
-        {isDirty ? '🧹' : '✨'}
-      </span>
-    );
-  };
+  // Toggle room cleanliness status is handled directly on booking records via the Allotment Details modal.
 
   // Renders a horizontal row of cells matching the calendar dates
   const renderCalendarCells = (room) => {
@@ -1149,9 +1041,7 @@ function App() {
                 <div className="booking-footer-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', marginTop: '4px' }}>
                   <span 
                     className="booking-badge"
-                    title={booking.status === 'dirty' ? "Click to mark as Clean" : "Click to mark as Dirty"}
                     style={{ 
-                      cursor: 'pointer', 
                       display: 'inline-flex', 
                       alignItems: 'center', 
                       gap: '4px', 
@@ -1161,16 +1051,10 @@ function App() {
                         ? 'rgba(239, 68, 68, 0.2)' 
                         : 'rgba(34, 197, 94, 0.2)' 
                     }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleToggleCleanliness(booking);
-                    }}
                   >
                     {booking.status === 'dirty' 
                       ? '🧹 Needs Cleaning' 
-                      : booking.status === 'Checked_in' 
-                        ? '✨ Checked-In' 
-                        : `✨ ${booking.status}`}
+                      : '✨ Cleaned'}
                   </span>
                   <span className="booking-advance" style={booking.advance_status === 'Unpaid' ? { color: '#f87171', fontSize: '0.65rem', fontWeight: 'bold' } : {}}>
                     {booking.advance_status === 'Unpaid' ? 'Incomplete Advance' : `₹${parseFloat(booking.advance_paid).toLocaleString('en-IN')}`}
@@ -1186,26 +1070,13 @@ function App() {
         }
       } else {
         const targetDate = dates[i];
-        const isRoomDirty = room.cleanliness === 'dirty';
         cells.push(
           <td
             key={`empty-${room.id}-${dateStr}`}
-            className={`empty-cell ${isRoomDirty ? 'dirty-vacant-cell' : ''}`}
-            onClick={() => {
-              if (isRoomDirty) {
-                const markClean = window.confirm(`Room ${room.number} is marked as Dirty. Do you want to mark it as Clean?\n\n- Click [OK] to mark as Clean.\n- Click [Cancel] to proceed with adding a reservation.`);
-                if (markClean) {
-                  handleToggleRoomCleanliness(room);
-                  return;
-                }
-              }
-              handleOpenReservationModal(room, targetDate);
-            }}
-            style={isRoomDirty ? { cursor: 'pointer', background: 'repeating-linear-gradient(45deg, rgba(153, 27, 27, 0.15), rgba(153, 27, 27, 0.15) 6px, rgba(69, 10, 10, 0.15) 6px, rgba(69, 10, 10, 0.15) 12px)' } : {}}
+            className="empty-cell"
+            onClick={() => handleOpenReservationModal(room, targetDate)}
           >
-            <div className="empty-cell-inner" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
-              {isRoomDirty ? <span style={{ fontSize: '0.85rem' }} title="Room needs cleaning">🧹</span> : '+'}
-            </div>
+            <div className="empty-cell-inner">+</div>
           </td>
         );
         i++;
@@ -1390,13 +1261,8 @@ function App() {
                   {rooms.filter(r => r.room_type === 'Standard').map(room => (
                     <tr key={room.id}>
                       <td className="room-cell">
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-                          <div style={{ display: 'flex', flexDirection: 'column' }}>
-                            {room.number}
-                            <span className="room-type-badge">Standard - ₹1,500</span>
-                          </div>
-                          {renderRoomCleanlinessEmoji(room)}
-                        </div>
+                        {room.number}
+                        <span className="room-type-badge">Standard - ₹1,500</span>
                       </td>
                       {renderCalendarCells(room)}
                     </tr>
@@ -1411,13 +1277,8 @@ function App() {
                   {rooms.filter(r => r.room_type === 'Deluxe').map(room => (
                     <tr key={room.id}>
                       <td className="room-cell">
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-                          <div style={{ display: 'flex', flexDirection: 'column' }}>
-                            {room.number}
-                            <span className="room-type-badge">Deluxe - ₹2,500</span>
-                          </div>
-                          {renderRoomCleanlinessEmoji(room)}
-                        </div>
+                        {room.number}
+                        <span className="room-type-badge">Deluxe - ₹2,500</span>
                       </td>
                       {renderCalendarCells(room)}
                     </tr>
@@ -1432,13 +1293,8 @@ function App() {
                   {rooms.filter(r => r.room_type === 'Superior').map(room => (
                     <tr key={room.id}>
                       <td className="room-cell">
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-                          <div style={{ display: 'flex', flexDirection: 'column' }}>
-                            {room.number}
-                            <span className="room-type-badge">Superior - ₹4,000</span>
-                          </div>
-                          {renderRoomCleanlinessEmoji(room)}
-                        </div>
+                        {room.number}
+                        <span className="room-type-badge">Superior - ₹4,000</span>
                       </td>
                       {renderCalendarCells(room)}
                     </tr>
@@ -1791,6 +1647,18 @@ function App() {
                           color: selectedBooking.status === 'Checked_in' ? '#4ade80' : selectedBooking.status === 'dirty' ? '#9ca3af' : '#60a5fa'
                         }}>
                           {selectedBooking.status === 'Checked_in' ? 'Checked-In' : selectedBooking.status === 'dirty' ? 'Dirty' : 'Booked'}
+                        </span>
+                      </div>
+                      <div style={{ marginTop: '4px' }}>
+                        <strong>Cleanliness:</strong> <span style={{
+                          padding: '2px 6px',
+                          borderRadius: '4px',
+                          fontSize: '0.7rem',
+                          fontWeight: 'bold',
+                          background: selectedBooking.status === 'dirty' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(34, 197, 94, 0.2)',
+                          color: selectedBooking.status === 'dirty' ? '#ef4444' : '#4ade80'
+                        }}>
+                          {selectedBooking.status === 'dirty' ? '🧹 Needs Cleaning' : '✨ Cleaned'}
                         </span>
                       </div>
                     </div>
