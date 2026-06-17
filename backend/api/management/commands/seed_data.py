@@ -1,11 +1,11 @@
 from django.core.management.base import BaseCommand
 from django.contrib.auth.models import User
 from django.utils import timezone
-from api.models import Hotel, RoomType, Room, Booking
+from api.models import Hotel, RoomType, Room, Booking, Transaction
 import datetime
 
 class Command(BaseCommand):
-    help = 'Seeds admin, owner, 4 managers, and 2 hotels into the database with updated RoomType and DateTime checks.'
+    help = 'Seeds admin, owner, 4 managers, and 2 hotels into the database with updated RoomType, DateTime checks, and Transactions.'
 
     def handle(self, *args, **options):
         self.stdout.write('Seeding data with 1 Admin, 1 Owner, 4 custom Managers, and 2 Hotels...')
@@ -70,7 +70,8 @@ class Command(BaseCommand):
         RoomType.objects.all().delete()
         Room.objects.all().delete()
         Booking.objects.all().delete()
-        self.stdout.write('Cleared previous RoomTypes, rooms, and booking entries.')
+        Transaction.objects.all().delete()
+        self.stdout.write('Cleared previous RoomTypes, rooms, booking, and transaction entries.')
 
         # Create Room Types for Hotel A and Hotel B
         def seed_room_types_for_hotel(hotel):
@@ -119,7 +120,7 @@ class Command(BaseCommand):
         rooms_a = seed_rooms_for_hotel(hotel_a, types_a)
         self.stdout.write(f"Seeded 13 rooms for {hotel_a.name}")
         
-        Booking.objects.create(
+        b1 = Booking.objects.create(
             room=rooms_a[0],  # STD-101
             guest_first_name="Ramesh",
             guest_last_name="Kumar",
@@ -128,10 +129,16 @@ class Command(BaseCommand):
             check_in=make_dt(today),
             check_out=make_dt(today + datetime.timedelta(days=2)),
             status="Booked",
-            advance_paid=500.00,
-            advance_status="Paid"
+            notes="Wants early check-in if possible."
         )
-        Booking.objects.create(
+        Transaction.objects.create(
+            booking=b1,
+            amount=500.00,
+            payment_method="Cash",
+            receipt_id="REC-001"
+        )
+
+        b2 = Booking.objects.create(
             room=rooms_a[5],  # DLX-116
             guest_first_name="Priya",
             guest_last_name="Sharma",
@@ -140,11 +147,17 @@ class Command(BaseCommand):
             check_in=make_dt(today + datetime.timedelta(days=1)),
             check_out=make_dt(today + datetime.timedelta(days=4)),
             status="Checked_in",
-            advance_paid=1000.00,
-            advance_status="Paid"
+            notes="Needs extra towels."
         )
+        Transaction.objects.create(
+            booking=b2,
+            amount=1000.00,
+            payment_method="UPI",
+            receipt_id="REC-002"
+        )
+
         # Seed a dirty room to verify the cleaning interface works out of the box
-        Booking.objects.create(
+        b3 = Booking.objects.create(
             room=rooms_a[10],  # SUP-131
             guest_first_name="Amit",
             guest_last_name="Patel",
@@ -153,15 +166,26 @@ class Command(BaseCommand):
             check_in=make_dt(today - datetime.timedelta(days=2)),
             check_out=make_dt(today),
             status="dirty",
-            advance_paid=0.00,
-            advance_status="Unpaid"
+            notes="Already checked out. Waiting for housekeeping."
+        )
+        Transaction.objects.create(
+            booking=b3,
+            amount=2000.00,
+            payment_method="Card",
+            receipt_id="REC-003"
+        )
+        Transaction.objects.create(
+            booking=b3,
+            amount=2000.00,
+            payment_method="Cash",
+            receipt_id="REC-004"
         )
 
         # Seed rooms and bookings for hotel_b
         rooms_b = seed_rooms_for_hotel(hotel_b, types_b)
         self.stdout.write(f"Seeded 13 rooms for {hotel_b.name}")
 
-        Booking.objects.create(
+        b4 = Booking.objects.create(
             room=rooms_b[1],  # STD-102
             guest_first_name="Suresh",
             guest_last_name="Raina",
@@ -169,11 +193,16 @@ class Command(BaseCommand):
             guest_email="suresh@example.com",
             check_in=make_dt(today),
             check_out=make_dt(today + datetime.timedelta(days=3)),
-            status="Booked",
-            advance_paid=500.00,
-            advance_status="Paid"
+            status="Booked"
         )
-        Booking.objects.create(
+        Transaction.objects.create(
+            booking=b4,
+            amount=500.00,
+            payment_method="UPI",
+            receipt_id="REC-005"
+        )
+
+        b5 = Booking.objects.create(
             room=rooms_b[6],  # DLX-117
             guest_first_name="Anjali",
             guest_last_name="Devi",
@@ -181,9 +210,13 @@ class Command(BaseCommand):
             guest_email="anjali@example.com",
             check_in=make_dt(today + datetime.timedelta(days=2)),
             check_out=make_dt(today + datetime.timedelta(days=5)),
-            status="Checked_in",
-            advance_paid=1500.00,
-            advance_status="Paid"
+            status="Checked_in"
+        )
+        Transaction.objects.create(
+            booking=b5,
+            amount=1500.00,
+            payment_method="Cash",
+            receipt_id="REC-006"
         )
 
         self.stdout.write(self.style.SUCCESS('Seeding complete!'))

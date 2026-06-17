@@ -40,7 +40,9 @@ function App() {
     check_out_time: '11:30 AM',
     status: 'Booked',
     advance_paid: 0,
-    advance_status: 'Paid'
+    advance_status: 'Paid',
+    payment_method: 'Cash',
+    receipt_id: ''
   });
 
   // 14-day rolling window calendar starting from today
@@ -59,6 +61,47 @@ function App() {
   const [toasts, setToasts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [fetchError, setFetchError] = useState(false);
+
+  // Context Menu and Info Modal states
+  const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0, booking: null });
+  const [infoModalOpen, setInfoModalOpen] = useState(false);
+  const [selectedBooking, setSelectedBooking] = useState(null);
+  
+  // Notes state
+  const [notesText, setNotesText] = useState('');
+  
+  // Payment transactions quick record state
+  const [paymentAmount, setPaymentAmount] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('Cash');
+  const [paymentReceiptId, setPaymentReceiptId] = useState('');
+  const [paymentModalOpen, setPaymentModalOpen] = useState(false);
+  const [extraChargesInput, setExtraChargesInput] = useState('');
+  const [amountToPayInput, setAmountToPayInput] = useState('');
+  const [extraAmountInput, setExtraAmountInput] = useState('0');
+
+  // Checkout modal state
+  const [checkoutModalOpen, setCheckoutModalOpen] = useState(false);
+  const [checkoutPaymentMethod, setCheckoutPaymentMethod] = useState('Cash');
+  const [checkoutReceiptId, setCheckoutReceiptId] = useState('');
+
+  // Cancellation & refund modal state
+  const [cancelModalOpen, setCancelModalOpen] = useState(false);
+  const [cancelRefundAmount, setCancelRefundAmount] = useState('');
+  const [cancelPaymentMethod, setCancelPaymentMethod] = useState('Cash');
+
+  // Cancellation receipt state
+  const [receiptModalOpen, setReceiptModalOpen] = useState(false);
+  const [receiptData, setReceiptData] = useState(null);
+
+  useEffect(() => {
+    const handleGlobalClick = () => {
+      if (contextMenu.visible) {
+        setContextMenu(prev => ({ ...prev, visible: false }));
+      }
+    };
+    window.addEventListener('click', handleGlobalClick);
+    return () => window.removeEventListener('click', handleGlobalClick);
+  }, [contextMenu.visible]);
 
   // Helper: formats date to YYYY-MM-DD
   const formatDate = (date) => {
@@ -241,7 +284,9 @@ function App() {
       check_out_time: '11:30 AM',
       status: 'Booked',
       advance_paid: room.min_advance,
-      advance_status: 'Paid'
+      advance_status: 'Paid',
+      payment_method: 'Cash',
+      receipt_id: ''
     });
     setModalOpen(true);
   };
@@ -267,9 +312,298 @@ function App() {
       check_out_time: booking.check_out_time || '11:30 AM',
       status: booking.status,
       advance_paid: booking.advance_paid,
-      advance_status: booking.advance_status || 'Paid'
+      advance_status: booking.advance_status || 'Paid',
+      payment_method: 'Cash',
+      receipt_id: ''
     });
     setModalOpen(true);
+  };
+
+  const handleOpenInfoModal = (booking) => {
+    setSelectedBooking(booking);
+    setNotesText(booking.notes || '');
+    setAmountToPayInput(booking.outstanding_amount.toString());
+    setExtraAmountInput('0');
+    setInfoModalOpen(true);
+  };
+
+  const handleCloseInfoModal = () => {
+    setInfoModalOpen(false);
+    setSelectedBooking(null);
+  };
+
+  const refreshBookings = () => {
+    fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/?hotel_code=${hotelCode}`, {
+      headers: { 'Authorization': `Token ${token}` }
+    })
+      .then(res => res.json())
+      .then(data => {
+        setBookings(data);
+        if (selectedBooking) {
+          const updated = data.find(b => b.id === selectedBooking.id);
+          if (updated) {
+            setSelectedBooking(updated);
+            setNotesText(updated.notes || '');
+            setAmountToPayInput(updated.outstanding_amount.toString());
+          }
+        }
+      });
+  };
+
+  const handleSaveNotes = () => {
+    if (!selectedBooking) return;
+    fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/${selectedBooking.id}/`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Token ${token}`
+      },
+      body: JSON.stringify({ notes: notesText })
+    })
+      .then(async res => {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed to save notes');
+        return data;
+      })
+      .then(data => {
+        triggerToast('Notes saved successfully!');
+        setSelectedBooking(data);
+        refreshBookings();
+      })
+      .catch(err => triggerToast(err.message));
+  };
+
+  const handlePayTotalBill = async () => {
+    if (!selectedBooking) return;
+    const amountToPay = parseFloat(amountToPayInput) || 0;
+    const extraAmount = parseFloat(extraAmountInput) || 0;
+    const totalToPay = amountToPay + extraAmount;
+
+    if (totalToPay <= 0) {
+      triggerToast('Please enter an amount to pay.');
+      return;
+    }
+
+    try {
+      let finalBooking = selectedBooking;
+      if (extraAmount > 0) {
+        const currentExtra = parseFloat(selectedBooking.extra_charges) || 0;
+        const newExtra = currentExtra + extraAmount;
+
+        const putRes = await fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/${selectedBooking.id}/`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Token ${token}`
+          },
+          body: JSON.stringify({ extra_charges: newExtra })
+        });
+        if (!putRes.ok) {
+          const putData = await putRes.json();
+          throw new Error(putData.detail || 'Failed to update extra charges');
+        }
+        finalBooking = await putRes.json();
+      }
+
+      const postRes = await fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/${finalBooking.id}/transactions/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Token ${token}`
+        },
+        body: JSON.stringify({
+          amount: totalToPay,
+          payment_method: paymentMethod,
+          receipt_id: paymentReceiptId
+        })
+      });
+      if (!postRes.ok) {
+        const postData = await postRes.json();
+        throw new Error(postData.detail || 'Failed to log transaction');
+      }
+      finalBooking = await postRes.json();
+
+      const receipt = {
+        type: 'total_bill',
+        guestName: `${finalBooking.guest_first_name} ${finalBooking.guest_last_name}`,
+        roomNumber: finalBooking.room_number,
+        stayCost: parseFloat(finalBooking.total_cost) - parseFloat(finalBooking.extra_charges || 0),
+        extraCharges: parseFloat(finalBooking.extra_charges || 0),
+        totalCost: parseFloat(finalBooking.total_cost),
+        amountPaid: totalToPay,
+        paymentMethod: paymentMethod,
+        receiptId: paymentReceiptId,
+        outstanding: parseFloat(finalBooking.outstanding_amount),
+        timestamp: new Date().toLocaleString()
+      };
+
+      triggerToast(`Successfully processed payment of ₹${totalToPay.toLocaleString('en-IN')}!`);
+      setExtraAmountInput('0');
+      setPaymentReceiptId('');
+      setSelectedBooking(finalBooking);
+      setAmountToPayInput(finalBooking.outstanding_amount.toString());
+      setReceiptData(receipt);
+      setReceiptModalOpen(true);
+      refreshBookings();
+    } catch (err) {
+      triggerToast(err.message);
+    }
+  };
+
+  const handleCheckIn = (bookingId) => {
+    fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/${bookingId}/`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Token ${token}`
+      },
+      body: JSON.stringify({ status: 'Checked_in' })
+    })
+      .then(async res => {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed to check in');
+        return data;
+      })
+      .then(data => {
+        triggerToast('Guest checked in successfully!');
+        refreshBookings();
+      })
+      .catch(err => triggerToast(err.message));
+  };
+
+  const handleRecordPayment = () => {
+    if (!selectedBooking || !paymentAmount) return;
+    fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/${selectedBooking.id}/transactions/`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Token ${token}`
+      },
+      body: JSON.stringify({
+        amount: parseFloat(paymentAmount),
+        payment_method: paymentMethod,
+        receipt_id: paymentReceiptId
+      })
+    })
+      .then(async res => {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed to log transaction');
+        return data;
+      })
+      .then(data => {
+        triggerToast('Payment transaction logged successfully!');
+        setPaymentAmount('');
+        setPaymentReceiptId('');
+        setSelectedBooking(data);
+        refreshBookings();
+      })
+      .catch(err => triggerToast(err.message));
+  };
+
+  const handleRecordAdditionalAdvance = () => {
+    if (!paymentAmount) return;
+    const targetBooking = contextMenu.booking || selectedBooking;
+    if (!targetBooking) return;
+    
+    fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/${targetBooking.id}/transactions/`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Token ${token}`
+      },
+      body: JSON.stringify({
+        amount: parseFloat(paymentAmount),
+        payment_method: paymentMethod,
+        receipt_id: paymentReceiptId
+      })
+    })
+      .then(async res => {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed to log transaction');
+        return data;
+      })
+      .then(data => {
+        triggerToast('Additional payment transaction logged successfully!');
+        setPaymentAmount('');
+        setPaymentReceiptId('');
+        setPaymentModalOpen(false);
+        refreshBookings();
+      })
+      .catch(err => triggerToast(err.message));
+  };
+
+  const handleConfirmCancel = () => {
+    const targetBooking = contextMenu.booking || selectedBooking;
+    if (!targetBooking) return;
+    
+    const receipt = {
+      type: 'cancellation',
+      guestName: `${targetBooking.guest_first_name} ${targetBooking.guest_last_name}`,
+      roomNumber: targetBooking.room_number,
+      refundAmount: parseFloat(cancelRefundAmount) || 0,
+      paymentMethod: cancelPaymentMethod,
+      timestamp: new Date().toLocaleString()
+    };
+    
+    fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/${targetBooking.id}/`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Token ${token}` }
+    })
+      .then(res => {
+        if (!res.ok) throw new Error('Failed to cancel reservation');
+        setCancelModalOpen(false);
+        setInfoModalOpen(false);
+        setReceiptData(receipt);
+        setReceiptModalOpen(true);
+        triggerToast('Reservation cancelled successfully.');
+        refreshBookings();
+      })
+      .catch(err => triggerToast(err.message));
+  };
+
+  const handleConfirmCheckout = async () => {
+    const targetBooking = contextMenu.booking || selectedBooking;
+    if (!targetBooking) return;
+
+    try {
+      const outstanding = parseFloat(targetBooking.outstanding_amount);
+      if (outstanding > 0) {
+        const payRes = await fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/${targetBooking.id}/transactions/`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Token ${token}`
+          },
+          body: JSON.stringify({
+            amount: outstanding,
+            payment_method: checkoutPaymentMethod,
+            receipt_id: checkoutReceiptId
+          })
+        });
+        if (!payRes.ok) {
+          const payData = await payRes.json();
+          throw new Error(payData.detail || 'Checkout payment logging failed');
+        }
+      }
+      
+      const checkoutRes = await fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/${targetBooking.id}/`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Token ${token}`
+        },
+        body: JSON.stringify({ status: 'dirty' })
+      });
+      if (!checkoutRes.ok) throw new Error('Failed to check out booking');
+      
+      triggerToast('Guest checked out successfully! Room status set to dirty.');
+      setCheckoutModalOpen(false);
+      setInfoModalOpen(false);
+      setCheckoutReceiptId('');
+      refreshBookings();
+    } catch (err) {
+      triggerToast(err.message);
+    }
   };
 
   const isCheckoutPassed = (booking) => {
@@ -430,7 +764,9 @@ function App() {
         check_out_time: newBooking.check_out_time,
         status: newBooking.status,
         advance_paid: newBooking.advance_status === 'Unpaid' ? 0.00 : advancePaidNum,
-        advance_status: newBooking.advance_status
+        advance_status: newBooking.advance_status,
+        payment_method: newBooking.payment_method,
+        receipt_id: newBooking.receipt_id
       })
     })
       .then(async res => {
@@ -526,19 +862,29 @@ function App() {
               className={`booking-cell status-${booking.status.toLowerCase().replace(' ', '-')}`}
               onClick={(e) => {
                 e.stopPropagation();
-                handleOpenEditModal(booking);
+                handleOpenInfoModal(booking);
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setContextMenu({
+                  visible: true,
+                  x: e.clientX,
+                  y: e.clientY,
+                  booking: booking
+                });
               }}
             >
               <div 
                 className="booking-info-block"
                 onClick={(e) => {
                   e.stopPropagation();
-                  handleOpenEditModal(booking);
+                  handleOpenInfoModal(booking);
                 }}
               >
                 <div className="booking-header-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
                   <span className="booking-guest-name" style={{ maxWidth: '85%' }}>{booking.guest_first_name} {booking.guest_last_name}</span>
-                  <span className="booking-edit-indicator" title="Click to Edit" style={{ fontSize: '0.75rem', opacity: 0.6 }}>✏️</span>
+                  <span className="booking-edit-indicator" title="View Info / Notes" style={{ fontSize: '0.75rem', opacity: 0.6 }}>ℹ️</span>
                 </div>
                 <div className="booking-footer-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', marginTop: '4px' }}>
                   <span className="booking-badge">
@@ -891,6 +1237,34 @@ function App() {
                         style={newBooking.advance_status === 'Unpaid' ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                       />
                     </div>
+
+                    {!isEditMode && newBooking.advance_status === 'Paid' && (
+                      <>
+                        <div className="form-group">
+                          <label className="form-label">Advance Payment Method</label>
+                          <select
+                            className="input-control"
+                            value={newBooking.payment_method}
+                            onChange={e => setNewBooking(prev => ({ ...prev, payment_method: e.target.value }))}
+                            style={{ background: 'rgba(15, 23, 42, 0.85)', color: '#fff' }}
+                          >
+                            <option value="Cash">Cash</option>
+                            <option value="UPI">UPI</option>
+                            <option value="Card">Card</option>
+                          </select>
+                        </div>
+                        <div className="form-group">
+                          <label className="form-label">Advance Receipt ID (Optional)</label>
+                          <input
+                            type="text"
+                            className="input-control"
+                            placeholder="Receipt ID"
+                            value={newBooking.receipt_id}
+                            onChange={e => setNewBooking(prev => ({ ...prev, receipt_id: e.target.value }))}
+                          />
+                        </div>
+                      </>
+                    )}
                   </div>
 
                   <div className="modal-actions" style={{ justifyContent: 'space-between', display: 'flex', width: '100%' }}>
@@ -914,6 +1288,583 @@ function App() {
                     </div>
                   </div>
                 </form>
+              </div>
+            </div>
+          )}
+
+          {/* Context Menu */}
+          {contextMenu.visible && (
+            <div 
+              className="context-menu" 
+              style={{ top: `${contextMenu.y}px`, left: `${contextMenu.x}px` }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div 
+                className="context-menu-item"
+                onClick={() => {
+                  setContextMenu(prev => ({ ...prev, visible: false }));
+                  handleOpenInfoModal(contextMenu.booking);
+                }}
+              >
+                ℹ️ View Info / Notes
+              </div>
+              <div 
+                className="context-menu-item"
+                onClick={() => {
+                  setContextMenu(prev => ({ ...prev, visible: false }));
+                  handleOpenEditModal(contextMenu.booking);
+                }}
+              >
+                ✏️ Edit Booking Details
+              </div>
+              
+              {contextMenu.booking.status === 'Booked' && (
+                <div 
+                  className="context-menu-item"
+                  onClick={() => {
+                    setContextMenu(prev => ({ ...prev, visible: false }));
+                    handleCheckIn(contextMenu.booking.id);
+                  }}
+                >
+                  🟢 Check In Guest
+                </div>
+              )}
+              
+              {contextMenu.booking.status !== 'dirty' && (
+                <div 
+                  className="context-menu-item"
+                  onClick={() => {
+                    setPaymentAmount('');
+                    setPaymentReceiptId('');
+                    setPaymentMethod('Cash');
+                    setPaymentModalOpen(true);
+                    setContextMenu(prev => ({ ...prev, visible: false }));
+                  }}
+                >
+                  💵 Add Payment (Advance)
+                </div>
+              )}
+
+              {contextMenu.booking.status === 'Checked_in' && (
+                <div 
+                  className="context-menu-item"
+                  onClick={() => {
+                    setCheckoutPaymentMethod('Cash');
+                    setCheckoutReceiptId('');
+                    setCheckoutModalOpen(true);
+                    setContextMenu(prev => ({ ...prev, visible: false }));
+                  }}
+                >
+                  🚪 Check Out Guest
+                </div>
+              )}
+              
+              <div className="context-menu-divider"></div>
+              
+              <div 
+                className="context-menu-item danger"
+                onClick={() => {
+                  setCancelRefundAmount(contextMenu.booking.advance_paid);
+                  setCancelPaymentMethod('Cash');
+                  setCancelModalOpen(true);
+                  setContextMenu(prev => ({ ...prev, visible: false }));
+                }}
+              >
+                ❌ Cancel Reservation
+              </div>
+            </div>
+          )}
+
+          {/* Info Modal / Details Panel */}
+          {infoModalOpen && selectedBooking && (
+            <div className="modal-backdrop" onClick={handleCloseInfoModal}>
+              <div className="modal-content" style={{ maxWidth: '800px', width: '90%' }} onClick={e => e.stopPropagation()}>
+                <div className="modal-header">
+                  <h3>Room {selectedBooking.room_number} Allotment Details</h3>
+                  <button className="btn-close" onClick={handleCloseInfoModal}>&times;</button>
+                </div>
+
+                <div className="info-modal-grid">
+                  {/* Left Column: Guest Info & Notes */}
+                  <div className="info-section-card">
+                    <h4 className="info-section-title">👤 Guest & Stay Information</h4>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '0.8rem' }}>
+                      <div><strong>Guest:</strong> {selectedBooking.guest_first_name} {selectedBooking.guest_last_name}</div>
+                      <div><strong>Phone:</strong> {selectedBooking.guest_phone}</div>
+                      <div><strong>Email:</strong> {selectedBooking.guest_email || 'N/A'}</div>
+                      <div><strong>Room Category:</strong> {selectedBooking.room_type}</div>
+                      <div><strong>Stay Duration:</strong> {selectedBooking.check_in} to {selectedBooking.check_out}</div>
+                      <div><strong>Check-in Time:</strong> {selectedBooking.check_in_time}</div>
+                      <div><strong>Check-out Time:</strong> {selectedBooking.check_out_time}</div>
+                      <div style={{ marginTop: '4px' }}>
+                        <strong>Status:</strong> <span style={{
+                          padding: '2px 6px',
+                          borderRadius: '4px',
+                          fontSize: '0.7rem',
+                          fontWeight: 'bold',
+                          background: selectedBooking.status === 'Checked_in' ? 'rgba(34, 197, 94, 0.2)' : selectedBooking.status === 'dirty' ? 'rgba(156, 163, 175, 0.2)' : 'rgba(59, 130, 246, 0.2)',
+                          color: selectedBooking.status === 'Checked_in' ? '#4ade80' : selectedBooking.status === 'dirty' ? '#9ca3af' : '#60a5fa'
+                        }}>
+                          {selectedBooking.status === 'Checked_in' ? 'Checked-In' : selectedBooking.status === 'dirty' ? 'Dirty' : 'Booked'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div style={{ marginTop: '1rem' }}>
+                      <h4 className="info-section-title">📝 Special Notes & Requests</h4>
+                      <textarea
+                        className="notes-textarea"
+                        placeholder="Add booking notes, preferences, or issues..."
+                        value={notesText}
+                        onChange={e => setNotesText(e.target.value)}
+                      />
+                      <button 
+                        type="button" 
+                        className="btn-submit-modal" 
+                        style={{ marginTop: '8px', width: 'auto', fontSize: '0.75rem', padding: '6px 12px' }}
+                        onClick={handleSaveNotes}
+                      >
+                        💾 Save Notes
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Right Column: Billing & Transactions */}
+                  <div className="info-section-card">
+                    <h4 className="info-section-title">💳 Billing & Transactions</h4>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '0.8rem', marginBottom: '8px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>Stay Room Tariff Cost:</span>
+                        <strong>₹{(parseFloat(selectedBooking.total_cost) - parseFloat(selectedBooking.extra_charges || 0)).toLocaleString('en-IN')}</strong>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>Extra Charges / Incidentals:</span>
+                        <strong style={{ color: parseFloat(selectedBooking.extra_charges || 0) > 0 ? '#a78bfa' : 'inherit' }}>
+                          ₹{parseFloat(selectedBooking.extra_charges || 0).toLocaleString('en-IN')}
+                        </strong>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '4px', marginTop: '2px' }}>
+                        <span>Total Stay Cost:</span>
+                        <strong>₹{parseFloat(selectedBooking.total_cost).toLocaleString('en-IN')}</strong>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>Total Amount Paid:</span>
+                        <strong style={{ color: '#4ade80' }}>₹{parseFloat(selectedBooking.advance_paid).toLocaleString('en-IN')}</strong>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', borderTop: '1px dashed rgba(255,255,255,0.1)', paddingTop: '4px', marginTop: '2px' }}>
+                        <span>Outstanding Balance:</span>
+                        <strong style={{ color: parseFloat(selectedBooking.outstanding_amount) > 0 ? '#f87171' : '#4ade80' }}>
+                          ₹{parseFloat(selectedBooking.outstanding_amount).toLocaleString('en-IN')}
+                        </strong>
+                      </div>
+                      {parseFloat(selectedBooking.outstanding_amount) <= 0 ? (
+                        <div className="outstanding-badge-paid" style={{ marginTop: '4px' }}>✅ Fully Paid</div>
+                      ) : (
+                        <div className="outstanding-badge-unpaid" style={{ marginTop: '4px' }}>⚠️ Outstanding Balance Due</div>
+                      )}
+                    </div>
+
+                    <div style={{ flex: 1, minHeight: '120px', overflowY: 'auto' }}>
+                      <table className="txn-table">
+                        <thead>
+                          <tr>
+                            <th>Date</th>
+                            <th>Amount</th>
+                            <th>Method</th>
+                            <th>Receipt ID</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {selectedBooking.transactions && selectedBooking.transactions.length > 0 ? (
+                            selectedBooking.transactions.map(t => (
+                              <tr key={t.id}>
+                                <td>{t.created_at}</td>
+                                <td>₹{parseFloat(t.amount).toLocaleString('en-IN')}</td>
+                                <td>{t.payment_method}</td>
+                                <td>{t.receipt_id || 'N/A'}</td>
+                              </tr>
+                            ))
+                          ) : (
+                            <tr>
+                              <td colSpan="4" style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>No transactions recorded.</td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {selectedBooking.status !== 'dirty' && (
+                      <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.05)', paddingTop: '8px', marginTop: '4px' }}>
+                        <div style={{ fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '6px' }}>Receive Payment & Add Charges</div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '8px' }}>
+                          <div>
+                            <label style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '2px' }}>Amount to Pay (Room Tariff)</label>
+                            <input
+                              type="number"
+                              className="input-control"
+                              style={{ height: '30px', fontSize: '0.75rem', padding: '4px', width: '100%' }}
+                              placeholder="Amount to Pay (₹)"
+                              value={amountToPayInput}
+                              onChange={e => setAmountToPayInput(e.target.value)}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '2px' }}>Extra / Incidentals Charge</label>
+                            <input
+                              type="number"
+                              className="input-control"
+                              style={{ height: '30px', fontSize: '0.75rem', padding: '4px', width: '100%' }}
+                              placeholder="Extra Amount (₹)"
+                              value={extraAmountInput}
+                              onChange={e => setExtraAmountInput(e.target.value)}
+                            />
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: '8px', marginBottom: '8px' }}>
+                          <div>
+                            <label style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '2px' }}>Payment Method</label>
+                            <select
+                              className="input-control"
+                              style={{ height: '30px', fontSize: '0.75rem', padding: '4px', background: '#0f172a', width: '100%' }}
+                              value={paymentMethod}
+                              onChange={e => setPaymentMethod(e.target.value)}
+                            >
+                              <option value="Cash">Cash</option>
+                              <option value="UPI">UPI</option>
+                              <option value="Card">Card</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '2px' }}>Receipt/Txn ID (Optional)</label>
+                            <input
+                              type="text"
+                              className="input-control"
+                              style={{ height: '30px', fontSize: '0.75rem', padding: '4px', width: '100%' }}
+                              placeholder="Receipt ID"
+                              value={paymentReceiptId}
+                              onChange={e => setPaymentReceiptId(e.target.value)}
+                            />
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255, 255, 255, 0.03)', padding: '6px 10px', borderRadius: '4px', marginBottom: '8px', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Total to Collect:</span>
+                          <strong style={{ fontSize: '0.9rem', color: '#4ade80' }}>
+                            ₹{((parseFloat(amountToPayInput) || 0) + (parseFloat(extraAmountInput) || 0)).toLocaleString('en-IN')}
+                          </strong>
+                        </div>
+
+                        <button
+                          type="button"
+                          className="btn-submit-modal"
+                          style={{ height: '32px', fontSize: '0.8rem', width: '100%', background: 'rgba(52, 211, 153, 0.1)', borderColor: 'rgba(52, 211, 153, 0.3)', color: '#34d399', fontWeight: 'bold' }}
+                          onClick={handlePayTotalBill}
+                        >
+                          💳 Pay Total & Print Receipt
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="modal-actions" style={{ justifyContent: 'space-between', display: 'flex', width: '100%', borderTop: '1px solid rgba(255, 255, 255, 0.05)', paddingTop: '12px', marginTop: '12px' }}>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    {selectedBooking.status === 'Booked' && (
+                      <button 
+                        type="button" 
+                        className="btn-submit-modal" 
+                        style={{ background: 'rgba(34, 197, 94, 0.1)', borderColor: 'rgba(34, 197, 94, 0.3)', color: '#4ade80' }}
+                        onClick={() => handleCheckIn(selectedBooking.id)}
+                      >
+                        🟢 Check In
+                      </button>
+                    )}
+                    {selectedBooking.status === 'Checked_in' && (
+                      <button 
+                        type="button" 
+                        className="btn-submit-modal" 
+                        style={{ background: 'rgba(167, 139, 250, 0.1)', borderColor: 'rgba(167, 139, 250, 0.3)', color: '#c084fc' }}
+                        onClick={() => {
+                          setCheckoutPaymentMethod('Cash');
+                          setCheckoutReceiptId('');
+                          setCheckoutModalOpen(true);
+                        }}
+                      >
+                        🚪 Check Out
+                      </button>
+                    )}
+                    <button 
+                      type="button" 
+                      className="btn-cancel" 
+                      style={{ background: 'rgba(239, 68, 68, 0.1)', borderColor: 'rgba(239, 68, 68, 0.3)', color: '#ef4444' }}
+                      onClick={() => {
+                        setCancelRefundAmount(selectedBooking.advance_paid);
+                        setCancelPaymentMethod('Cash');
+                        setCancelModalOpen(true);
+                      }}
+                    >
+                      ❌ Cancel Reservation
+                    </button>
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button type="button" className="btn-submit-modal" onClick={() => {
+                      handleCloseInfoModal();
+                      handleOpenEditModal(selectedBooking);
+                    }}>✏️ Edit Details</button>
+                    <button type="button" className="btn-cancel" onClick={handleCloseInfoModal}>Close</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Quick Payment Modal */}
+          {paymentModalOpen && (contextMenu.booking || selectedBooking) && (
+            <div className="modal-backdrop" style={{ zIndex: 10000 }} onClick={() => setPaymentModalOpen(false)}>
+              <div className="modal-content" style={{ maxWidth: '400px' }} onClick={e => e.stopPropagation()}>
+                <div className="modal-header">
+                  <h3>Log Additional Payment</h3>
+                  <button className="btn-close" onClick={() => setPaymentModalOpen(false)}>&times;</button>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '8px' }}>
+                  <div className="form-group">
+                    <label className="form-label">Payment Amount (₹)</label>
+                    <input
+                      type="number"
+                      className="input-control"
+                      placeholder="Enter amount paid"
+                      value={paymentAmount}
+                      onChange={e => setPaymentAmount(e.target.value)}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Payment Method</label>
+                    <select
+                      className="input-control"
+                      value={paymentMethod}
+                      onChange={e => setPaymentMethod(e.target.value)}
+                      style={{ background: '#0f172a' }}
+                    >
+                      <option value="Cash">Cash</option>
+                      <option value="UPI">UPI</option>
+                      <option value="Card">Card</option>
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Receipt ID (Optional)</label>
+                    <input
+                      type="text"
+                      className="input-control"
+                      placeholder="Enter receipt/transaction ID"
+                      value={paymentReceiptId}
+                      onChange={e => setPaymentReceiptId(e.target.value)}
+                    />
+                  </div>
+                  <div className="modal-actions" style={{ marginTop: '12px' }}>
+                    <button type="button" className="btn-cancel" onClick={() => setPaymentModalOpen(false)}>Cancel</button>
+                    <button type="button" className="btn-submit-modal" onClick={handleRecordAdditionalAdvance}>Log Transaction</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Checkout Modal */}
+          {checkoutModalOpen && (contextMenu.booking || selectedBooking) && (
+            <div className="modal-backdrop" style={{ zIndex: 10000 }} onClick={() => setCheckoutModalOpen(false)}>
+              <div className="modal-content" style={{ maxWidth: '450px' }} onClick={e => e.stopPropagation()}>
+                <div className="modal-header">
+                  <h3>🚪 Room Check-Out</h3>
+                  <button className="btn-close" onClick={() => setCheckoutModalOpen(false)}>&times;</button>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px', fontSize: '0.85rem' }}>
+                  <div>Guest Name: <strong>{(contextMenu.booking || selectedBooking).guest_first_name} {(contextMenu.booking || selectedBooking).guest_last_name}</strong></div>
+                  <div>Room: <strong>{(contextMenu.booking || selectedBooking).room_number} ({(contextMenu.booking || selectedBooking).room_type})</strong></div>
+                  <div style={{ height: '1px', background: 'rgba(255,255,255,0.05)', margin: '8px 0' }}></div>
+                  <div>Total Stay Cost: <strong>₹{parseFloat((contextMenu.booking || selectedBooking).total_cost).toLocaleString('en-IN')}</strong></div>
+                  <div>Total Amount Paid: <strong>₹{parseFloat((contextMenu.booking || selectedBooking).advance_paid).toLocaleString('en-IN')}</strong></div>
+                  <div style={{ fontSize: '1rem', marginTop: '6px' }}>
+                    Outstanding Balance: <strong style={{ color: parseFloat((contextMenu.booking || selectedBooking).outstanding_amount) > 0 ? '#f87171' : '#4ade80' }}>
+                      ₹{parseFloat((contextMenu.booking || selectedBooking).outstanding_amount).toLocaleString('en-IN')}
+                    </strong>
+                  </div>
+                  
+                  {parseFloat((contextMenu.booking || selectedBooking).outstanding_amount) > 0 ? (
+                    <div style={{ marginTop: '8px', background: 'rgba(30,41,59,0.3)', padding: '10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.04)' }}>
+                      <div style={{ fontWeight: 'bold', marginBottom: '8px', color: '#a78bfa' }}>Receive Outstanding Payment</div>
+                      <div className="form-group" style={{ marginBottom: '6px' }}>
+                        <label className="form-label">Amount (₹)</label>
+                        <input
+                          type="number"
+                          className="input-control"
+                          disabled
+                          value={(contextMenu.booking || selectedBooking).outstanding_amount}
+                        />
+                      </div>
+                      <div className="form-group" style={{ marginBottom: '6px' }}>
+                        <label className="form-label">Payment Method</label>
+                        <select
+                          className="input-control"
+                          value={checkoutPaymentMethod}
+                          onChange={e => setCheckoutPaymentMethod(e.target.value)}
+                          style={{ background: '#0f172a' }}
+                        >
+                          <option value="Cash">Cash</option>
+                          <option value="UPI">UPI</option>
+                          <option value="Card">Card</option>
+                        </select>
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">Receipt ID (Optional)</label>
+                        <input
+                          type="text"
+                          className="input-control"
+                          placeholder="Enter transaction/receipt ID"
+                          value={checkoutReceiptId}
+                          onChange={e => setCheckoutReceiptId(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ marginTop: '8px', color: '#4ade80', background: 'rgba(34, 197, 94, 0.05)', padding: '8px', borderRadius: '6px', textAlign: 'center', fontWeight: 'bold' }}>
+                      ✅ Stay Fully Paid. Ready for checkout.
+                    </div>
+                  )}
+
+                  <div className="modal-actions" style={{ marginTop: '12px' }}>
+                    <button type="button" className="btn-cancel" onClick={() => setCheckoutModalOpen(false)}>Cancel</button>
+                    <button type="button" className="btn-submit-modal" onClick={handleConfirmCheckout}>
+                      {parseFloat((contextMenu.booking || selectedBooking).outstanding_amount) > 0 ? '🚪 Pay & Checkout' : '🚪 Complete Checkout'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Cancel & Refund Modal */}
+          {cancelModalOpen && (contextMenu.booking || selectedBooking) && (
+            <div className="modal-backdrop" style={{ zIndex: 10000 }} onClick={() => setCancelModalOpen(false)}>
+              <div className="modal-content" style={{ maxWidth: '400px' }} onClick={e => e.stopPropagation()}>
+                <div className="modal-header">
+                  <h3>❌ Cancel Reservation</h3>
+                  <button className="btn-close" onClick={() => setCancelModalOpen(false)}>&times;</button>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '8px', fontSize: '0.85rem' }}>
+                  <div style={{ color: '#fb7185', background: 'rgba(244, 63, 94, 0.05)', padding: '8px', borderRadius: '6px', marginBottom: '4px' }}>
+                    ⚠️ This action cancels the booking and vacates the room immediately.
+                  </div>
+                  <div>Total Paid So Far: <strong>₹{parseFloat((contextMenu.booking || selectedBooking).advance_paid).toLocaleString('en-IN')}</strong></div>
+                  
+                  <div className="form-group">
+                    <label className="form-label">Refund Amount (₹)</label>
+                    <input
+                      type="number"
+                      className="input-control"
+                      placeholder="Enter refund amount"
+                      value={cancelRefundAmount}
+                      onChange={e => setCancelRefundAmount(e.target.value)}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Refund Method</label>
+                    <select
+                      className="input-control"
+                      value={cancelPaymentMethod}
+                      onChange={e => setCancelPaymentMethod(e.target.value)}
+                      style={{ background: '#0f172a' }}
+                    >
+                      <option value="Cash">Cash</option>
+                      <option value="UPI">UPI</option>
+                      <option value="Card">Card</option>
+                    </select>
+                  </div>
+
+                  <div className="modal-actions" style={{ marginTop: '12px' }}>
+                    <button type="button" className="btn-cancel" onClick={() => setCancelModalOpen(false)}>Close</button>
+                    <button type="button" className="btn-submit-modal" style={{ background: '#ef4444', borderColor: '#dc2626' }} onClick={handleConfirmCancel}>
+                      Confirm Cancel & Refund
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Refund Receipt Modal */}
+          {receiptModalOpen && receiptData && (
+            <div className="modal-backdrop" style={{ zIndex: 11000 }} onClick={() => setReceiptModalOpen(false)}>
+              <div className="modal-content" style={{ maxWidth: '400px', background: '#020617', border: '1px solid #1e293b' }} onClick={e => e.stopPropagation()}>
+                <div className="modal-header" style={{ borderBottom: '1px dashed rgba(255,255,255,0.1)' }}>
+                  <h3>🧾 {receiptData.type === 'cancellation' ? 'Cancellation Receipt' : receiptData.type === 'total_bill' ? 'Invoice & Payment Receipt' : 'Payment Receipt'}</h3>
+                  <button className="btn-close" onClick={() => setReceiptModalOpen(false)}>&times;</button>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '12px', fontSize: '0.85rem', fontFamily: 'monospace' }}>
+                  <div style={{ textAlign: 'center', fontSize: '1rem', fontWeight: 'bold', marginBottom: '8px', textTransform: 'uppercase' }}>Abhirami Hotel Group</div>
+                  <div style={{ textAlign: 'center', color: '#94a3b8', marginBottom: '12px' }}>
+                    {receiptData.type === 'cancellation' ? 'Cancellation & Refund Voucher' : receiptData.type === 'total_bill' ? 'Invoice & Payment Receipt' : 'Payment Receipt Voucher'}
+                  </div>
+                  <div>Date/Time: {receiptData.timestamp}</div>
+                  <div>Guest Name: {receiptData.guestName}</div>
+                  <div>Room: Room {receiptData.roomNumber}</div>
+                  <div style={{ borderTop: '1px dashed rgba(255,255,255,0.1)', margin: '8px 0' }}></div>
+                  
+                  {receiptData.type === 'cancellation' ? (
+                    <>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1rem', fontWeight: 'bold' }}>
+                        <span>REFUND AMOUNT:</span>
+                        <span>₹{receiptData.refundAmount.toLocaleString('en-IN')}</span>
+                      </div>
+                      <div>Refund Method: {receiptData.paymentMethod}</div>
+                      <div style={{ borderTop: '1px dashed rgba(255,255,255,0.1)', margin: '8px 0' }}></div>
+                      <div style={{ textAlign: 'center', color: '#fb7185', fontWeight: 'bold', fontSize: '0.75rem', marginTop: '6px' }}>REFUND COMPLETED - BOOKING TERMINATED</div>
+                    </>
+                  ) : receiptData.type === 'total_bill' ? (
+                    <>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>Room Tariff:</span>
+                        <span>₹{receiptData.stayCost.toLocaleString('en-IN')}</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>Extra / Incidentals:</span>
+                        <span>₹{receiptData.extraCharges.toLocaleString('en-IN')}</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', borderTop: '1px dashed rgba(255,255,255,0.1)', paddingTop: '4px' }}>
+                        <span>Total Stay Cost:</span>
+                        <span>₹{receiptData.totalCost.toLocaleString('en-IN')}</span>
+                      </div>
+                      <div style={{ borderTop: '1px dashed rgba(255,255,255,0.1)', margin: '8px 0' }}></div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1rem', fontWeight: 'bold', color: '#4ade80' }}>
+                        <span>AMOUNT PAID NOW:</span>
+                        <span>₹{receiptData.amountPaid.toLocaleString('en-IN')}</span>
+                      </div>
+                      <div>Payment Method: {receiptData.paymentMethod}</div>
+                      {receiptData.receiptId && <div>Receipt/Txn ID: {receiptData.receiptId}</div>}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px', fontWeight: 'bold', color: receiptData.outstanding > 0 ? '#f87171' : '#4ade80' }}>
+                        <span>OUTSTANDING BALANCE:</span>
+                        <span>₹{receiptData.outstanding.toLocaleString('en-IN')}</span>
+                      </div>
+                      <div style={{ borderTop: '1px dashed rgba(255,255,255,0.1)', margin: '8px 0' }}></div>
+                      <div style={{ textAlign: 'center', color: '#4ade80', fontWeight: 'bold', fontSize: '0.75rem', marginTop: '6px' }}>PAYMENT COMPLETED - THANK YOU!</div>
+                    </>
+                  ) : (
+                    <>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1rem', fontWeight: 'bold' }}>
+                        <span>AMOUNT PAID:</span>
+                        <span>₹{receiptData.amount.toLocaleString('en-IN')}</span>
+                      </div>
+                      <div>Payment Method: {receiptData.paymentMethod}</div>
+                      {receiptData.receiptId && <div>Receipt/Txn ID: {receiptData.receiptId}</div>}
+                      <div style={{ borderTop: '1px dashed rgba(255,255,255,0.1)', margin: '8px 0' }}></div>
+                      <div style={{ textAlign: 'center', color: '#4ade80', fontWeight: 'bold', fontSize: '0.75rem', marginTop: '6px' }}>PAYMENT COMPLETED - THANK YOU!</div>
+                    </>
+                  )}
+                  
+                  <div className="modal-actions" style={{ marginTop: '16px', display: 'flex', justifyContent: 'center' }}>
+                    <button type="button" className="btn-submit-modal" style={{ width: 'auto', padding: '6px 20px' }} onClick={() => setReceiptModalOpen(false)}>OK</button>
+                  </div>
+                </div>
               </div>
             </div>
           )}

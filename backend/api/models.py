@@ -1,5 +1,6 @@
 from django.db import models
 from django.contrib.auth.models import User
+from decimal import Decimal
 
 class Hotel(models.Model):
     name = models.CharField(max_length=255)
@@ -46,13 +47,23 @@ class Booking(models.Model):
     check_in = models.DateTimeField()
     check_out = models.DateTimeField()
     status = models.CharField(max_length=50, choices=STATUS_CHOICES, default='Booked')
-    ADVANCE_STATUS_CHOICES = [
-        ('Paid', 'Paid'),
-        ('Unpaid', 'Unpaid'),
-    ]
-    advance_paid = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
-    advance_status = models.CharField(max_length=20, choices=ADVANCE_STATUS_CHOICES, default='Paid')
+    notes = models.TextField(blank=True, default='')
+    extra_charges = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
 
     def __str__(self):
         return f"{self.guest_first_name} {self.guest_last_name} - Room {self.room.number} ({self.check_in} to {self.check_out}) - Status: {self.status}"
 
+class Transaction(models.Model):
+    PAYMENT_METHOD_CHOICES = [
+        ('Cash', 'Cash'),
+        ('UPI', 'UPI'),
+        ('Card', 'Card'),
+    ]
+    booking = models.ForeignKey(Booking, on_delete=models.CASCADE, related_name='transactions')
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    payment_method = models.CharField(max_length=20, choices=PAYMENT_METHOD_CHOICES, default='Cash')
+    receipt_id = models.CharField(max_length=100, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Txn for Booking {self.booking.id} - {self.payment_method} - ₹{self.amount}"

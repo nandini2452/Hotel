@@ -8,4 +8,5 @@ urlpatterns = [
     path('my-hotel/rooms/', views.my_hotel_rooms, name='my_hotel_rooms'),
     path('my-hotel/bookings/', views.my_hotel_bookings, name='my_hotel_bookings'),
     path('my-hotel/bookings/<int:pk>/', views.my_hotel_booking_detail, name='my_hotel_booking_detail'),
+    path('my-hotel/bookings/<int:pk>/transactions/', views.create_transaction, name='create_transaction'),
 ]
