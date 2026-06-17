@@ -342,15 +342,16 @@ function App() {
     setSelectedBooking(null);
   };
 
-  const refreshBookings = () => {
-    fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/?hotel_code=${hotelCode}`, {
+  const refreshBookings = (activeBookingId = null) => {
+    const targetId = activeBookingId || (selectedBooking ? selectedBooking.id : null);
+    fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/?hotel_code=${hotelCode}&_t=${Date.now()}`, {
       headers: { 'Authorization': `Token ${token}` }
     })
       .then(res => res.json())
       .then(data => {
         setBookings(data);
-        if (selectedBooking) {
-          const updated = data.find(b => b.id === selectedBooking.id);
+        if (targetId) {
+          const updated = data.find(b => b.id === targetId);
           if (updated) {
             setSelectedBooking(updated);
             setNotesText(updated.notes || '');
@@ -378,7 +379,8 @@ function App() {
       .then(data => {
         triggerToast('Notes saved successfully!');
         setSelectedBooking(data);
-        refreshBookings();
+        setBookings(prev => prev.map(b => b.id === data.id ? data : b));
+        refreshBookings(data.id);
       })
       .catch(err => triggerToast(err.message));
   };
@@ -452,9 +454,10 @@ function App() {
       setPaymentReceiptId(generateReceiptId());
       setSelectedBooking(finalBooking);
       setAmountToPayInput(finalBooking.outstanding_amount.toString());
+      setBookings(prev => prev.map(b => b.id === finalBooking.id ? finalBooking : b));
       setReceiptData(receipt);
       setReceiptModalOpen(true);
-      refreshBookings();
+      refreshBookings(finalBooking.id);
     } catch (err) {
       triggerToast(err.message);
     }
@@ -476,7 +479,9 @@ function App() {
       })
       .then(data => {
         triggerToast('Guest checked in successfully!');
-        refreshBookings();
+        setSelectedBooking(data);
+        setBookings(prev => prev.map(b => b.id === data.id ? data : b));
+        refreshBookings(data.id);
       })
       .catch(err => triggerToast(err.message));
   };
@@ -505,7 +510,8 @@ function App() {
         setPaymentAmount('');
         setPaymentReceiptId('');
         setSelectedBooking(data);
-        refreshBookings();
+        setBookings(prev => prev.map(b => b.id === data.id ? data : b));
+        refreshBookings(data.id);
       })
       .catch(err => triggerToast(err.message));
   };
@@ -551,7 +557,8 @@ function App() {
         setPaymentAmount('');
         setPaymentReceiptId('');
         setPaymentModalOpen(false);
-        refreshBookings();
+        setBookings(prev => prev.map(b => b.id === data.id ? data : b));
+        refreshBookings(data.id);
       })
       .catch(err => triggerToast(err.message));
   };
@@ -915,6 +922,46 @@ function App() {
         console.error(err);
         triggerToast(err.message || 'Error occurred while processing request.');
       });
+  };
+
+  const handleUpdateCleanliness = async (newStatus) => {
+    if (!selectedBooking) return;
+    
+    if (newStatus === 'cleaned') {
+      handleCloseInfoModal();
+      handleQuickMarkCleaned(selectedBooking.id);
+      return;
+    }
+    
+    let statusValue = newStatus;
+    if (newStatus === 'clean') {
+      const todayStr = formatDate(new Date());
+      statusValue = selectedBooking.check_in <= todayStr ? 'Checked_in' : 'Booked';
+    } else if (newStatus === 'dirty') {
+      statusValue = 'dirty';
+    }
+    
+    try {
+      const res = await fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/${selectedBooking.id}/`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Token ${token}`
+        },
+        body: JSON.stringify({ status: statusValue })
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.detail || 'Failed to update status');
+      }
+      const updated = await res.json();
+      triggerToast(`Room status updated to ${newStatus === 'clean' ? 'Clean' : 'Dirty (Needs Cleaning)'}!`);
+      setSelectedBooking(updated);
+      setBookings(prev => prev.map(b => b.id === updated.id ? updated : b));
+      refreshBookings(updated.id);
+    } catch (err) {
+      triggerToast(err.message);
+    }
   };
 
   // Renders a horizontal row of cells matching the calendar dates
@@ -1720,6 +1767,20 @@ function App() {
                         ❌ Cancel Reservation
                       </button>
                     )}
+                    
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: '12px', borderLeft: '1px solid rgba(255, 255, 255, 0.1)', paddingLeft: '12px' }}>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Room Cleanliness:</span>
+                      <select
+                        className="input-control"
+                        style={{ height: '30px', fontSize: '0.75rem', padding: '4px 8px', background: '#0f172a', width: '185px', color: '#fff', borderColor: 'rgba(255,255,255,0.15)', cursor: 'pointer' }}
+                        value={selectedBooking.status === 'dirty' ? 'dirty' : 'clean'}
+                        onChange={e => handleUpdateCleanliness(e.target.value)}
+                      >
+                        <option value="clean">🧼 Clean (Occupied/Active)</option>
+                        <option value="dirty">🧹 Dirty (Needs Cleaning)</option>
+                        <option value="cleaned">✨ Cleaned (Vacate Room)</option>
+                      </select>
+                    </div>
                   </div>
                   <div style={{ display: 'flex', gap: '8px' }}>
                     <button type="button" className="btn-submit-modal" onClick={() => {
