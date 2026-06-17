@@ -111,6 +111,15 @@ function App() {
     return `${year}-${month}-${day}`;
   };
 
+  const generateReceiptId = () => {
+    const chars = '0123456789';
+    let result = '';
+    for (let i = 0; i < 6; i++) {
+      result += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return `REC-${result}`;
+  };
+
   // Fetch hotels list on mount
   useEffect(() => {
     fetch('http://127.0.0.1:8000/api/hotels/')
@@ -286,7 +295,7 @@ function App() {
       advance_paid: room.min_advance,
       advance_status: 'Paid',
       payment_method: 'Cash',
-      receipt_id: ''
+      receipt_id: generateReceiptId()
     });
     setModalOpen(true);
   };
@@ -314,7 +323,7 @@ function App() {
       advance_paid: booking.advance_paid,
       advance_status: booking.advance_status || 'Paid',
       payment_method: 'Cash',
-      receipt_id: ''
+      receipt_id: booking.transactions && booking.transactions.length > 0 ? (booking.transactions[0].receipt_id || '') : generateReceiptId()
     });
     setModalOpen(true);
   };
@@ -324,6 +333,7 @@ function App() {
     setNotesText(booking.notes || '');
     setAmountToPayInput(booking.outstanding_amount.toString());
     setExtraAmountInput('0');
+    setPaymentReceiptId(generateReceiptId());
     setInfoModalOpen(true);
   };
 
@@ -439,7 +449,7 @@ function App() {
 
       triggerToast(`Successfully processed payment of ₹${totalToPay.toLocaleString('en-IN')}!`);
       setExtraAmountInput('0');
-      setPaymentReceiptId('');
+      setPaymentReceiptId(generateReceiptId());
       setSelectedBooking(finalBooking);
       setAmountToPayInput(finalBooking.outstanding_amount.toString());
       setReceiptData(receipt);
@@ -1335,7 +1345,7 @@ function App() {
                   className="context-menu-item"
                   onClick={() => {
                     setPaymentAmount('');
-                    setPaymentReceiptId('');
+                    setPaymentReceiptId(generateReceiptId());
                     setPaymentMethod('Cash');
                     setPaymentModalOpen(true);
                     setContextMenu(prev => ({ ...prev, visible: false }));
@@ -1350,7 +1360,7 @@ function App() {
                   className="context-menu-item"
                   onClick={() => {
                     setCheckoutPaymentMethod('Cash');
-                    setCheckoutReceiptId('');
+                    setCheckoutReceiptId(generateReceiptId());
                     setCheckoutModalOpen(true);
                     setContextMenu(prev => ({ ...prev, visible: false }));
                   }}
@@ -1587,7 +1597,7 @@ function App() {
                         style={{ background: 'rgba(167, 139, 250, 0.1)', borderColor: 'rgba(167, 139, 250, 0.3)', color: '#c084fc' }}
                         onClick={() => {
                           setCheckoutPaymentMethod('Cash');
-                          setCheckoutReceiptId('');
+                          setCheckoutReceiptId(generateReceiptId());
                           setCheckoutModalOpen(true);
                         }}
                       >
