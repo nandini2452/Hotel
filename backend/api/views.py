@@ -204,6 +204,7 @@ def my_hotel_bookings(request):
                 "check_out": local_out.strftime('%Y-%m-%d'),
                 "check_out_time": local_out.strftime('%I:%M %p'),
                 "status": b.status,
+                "checked_out": b.checked_out,
                 "notes": b.notes,
                 "extra_charges": b.extra_charges,
                 "total_cost": total_cost,
@@ -351,6 +352,7 @@ def my_hotel_bookings(request):
             "check_out": local_out.strftime('%Y-%m-%d'),
             "check_out_time": local_out.strftime('%I:%M %p'),
             "status": booking.status,
+            "checked_out": booking.checked_out,
             "notes": booking.notes,
             "extra_charges": booking.extra_charges,
             "total_cost": total_cost,
@@ -388,6 +390,7 @@ def my_hotel_booking_detail(request, pk):
         check_out = request.data.get('check_out')
         check_out_time = '11:30 AM'
         status_val = request.data.get('status')
+        checked_out_val = request.data.get('checked_out')
         notes = request.data.get('notes')
         extra_charges = request.data.get('extra_charges')
 
@@ -410,6 +413,8 @@ def my_hotel_booking_detail(request, pk):
             elif status_val in ['Checked_in', 'Booked']:
                 booking.room.cleanliness = 'clean'
                 booking.room.save()
+        if checked_out_val is not None:
+            booking.checked_out = checked_out_val
         if notes is not None:
             booking.notes = notes
         if extra_charges is not None:
@@ -484,6 +489,7 @@ def my_hotel_booking_detail(request, pk):
             "check_out": local_out_new.strftime('%Y-%m-%d'),
             "check_out_time": local_out_new.strftime('%I:%M %p'),
             "status": booking.status,
+            "checked_out": booking.checked_out,
             "notes": booking.notes,
             "extra_charges": booking.extra_charges,
             "total_cost": total_cost,

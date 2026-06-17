@@ -626,7 +626,7 @@ function App() {
           'Content-Type': 'application/json',
           'Authorization': `Token ${token}`
         },
-        body: JSON.stringify({ status: 'dirty' })
+        body: JSON.stringify({ status: 'dirty', checked_out: true })
       });
       if (!checkoutRes.ok) throw new Error('Failed to check out booking');
       
@@ -659,6 +659,7 @@ function App() {
   };
 
   const isCheckoutPassed = (booking) => {
+    if (booking.checked_out) return false;
     if (booking.status !== 'Checked_in') return false;
     if (!booking.check_out) return false;
     
@@ -695,7 +696,8 @@ function App() {
         'Authorization': `Token ${token}`
       },
       body: JSON.stringify({
-        status: 'Checked-Out'
+        status: 'dirty',
+        checked_out: true
       })
     })
       .then(async res => {
@@ -706,7 +708,7 @@ function App() {
         return data;
       })
       .then(() => {
-        triggerToast('Guest checked out successfully! Room is now vacant.');
+        triggerToast('Guest checked out successfully! Room status set to dirty.');
         // Refresh bookings
         fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/?hotel_code=${hotelCode}`, {
           headers: { 'Authorization': `Token ${token}` }
@@ -992,7 +994,8 @@ function App() {
       const booking = bookings.find(b => 
         Number(b.room_id) === Number(room.id) && 
         b.check_in <= dateStr && 
-        b.check_out > dateStr
+        b.check_out > dateStr &&
+        !(b.checked_out && b.status !== 'dirty')
       );
       
       if (booking) {
@@ -1035,7 +1038,9 @@ function App() {
                 }}
               >
                 <div className="booking-header-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-                  <span className="booking-guest-name" style={{ maxWidth: '85%' }}>{booking.guest_first_name} {booking.guest_last_name}</span>
+                  <span className="booking-guest-name" style={{ maxWidth: '85%', fontStyle: booking.checked_out ? 'italic' : 'normal', opacity: booking.checked_out ? 0.75 : 1 }}>
+                    {booking.checked_out ? '🧹 Needs Cleaning (Checked Out)' : `${booking.guest_first_name} ${booking.guest_last_name}`}
+                  </span>
                   <span className="booking-edit-indicator" title="View Info / Notes" style={{ fontSize: '0.75rem', opacity: 0.6 }}>ℹ️</span>
                 </div>
                 <div className="booking-footer-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', marginTop: '4px' }}>
@@ -1056,8 +1061,8 @@ function App() {
                       ? '🧹 Needs Cleaning' 
                       : '✨ Cleaned'}
                   </span>
-                  <span className="booking-advance" style={booking.advance_status === 'Unpaid' ? { color: '#f87171', fontSize: '0.65rem', fontWeight: 'bold' } : {}}>
-                    {booking.advance_status === 'Unpaid' ? 'Incomplete Advance' : `₹${parseFloat(booking.advance_paid).toLocaleString('en-IN')}`}
+                  <span className="booking-advance" style={booking.checked_out ? { color: 'var(--text-secondary)', fontSize: '0.7rem' } : (booking.advance_status === 'Unpaid' ? { color: '#f87171', fontSize: '0.65rem', fontWeight: 'bold' } : {})}>
+                    {booking.checked_out ? '🚪 Checked Out' : (booking.advance_status === 'Unpaid' ? 'Incomplete Advance' : `₹${parseFloat(booking.advance_paid).toLocaleString('en-IN')}`)}
                   </span>
                 </div>
               </div>
@@ -1621,7 +1626,7 @@ function App() {
             <div className="modal-backdrop" onClick={handleCloseInfoModal}>
               <div className="modal-content" style={{ maxWidth: '800px', width: '90%' }} onClick={e => e.stopPropagation()}>
                 <div className="modal-header">
-                  <h3>Room {selectedBooking.room_number} Allotment Details</h3>
+                  <h3>Room {selectedBooking.room_number} Allotment Details {selectedBooking.checked_out && <span style={{ color: '#ef4444', fontSize: '0.9rem', marginLeft: '12px' }}>(Checked Out)</span>}</h3>
                   <button className="btn-close" onClick={handleCloseInfoModal}>&times;</button>
                 </div>
 
@@ -1823,7 +1828,7 @@ function App() {
 
                 <div className="modal-actions" style={{ justifyContent: 'space-between', display: 'flex', width: '100%', borderTop: '1px solid rgba(255, 255, 255, 0.05)', paddingTop: '12px', marginTop: '12px' }}>
                   <div style={{ display: 'flex', gap: '8px' }}>
-                    {selectedBooking.status === 'Booked' && (
+                    {!selectedBooking.checked_out && selectedBooking.status === 'Booked' && (
                       <button 
                         type="button" 
                         className="btn-submit-modal" 
@@ -1833,7 +1838,7 @@ function App() {
                         🟢 Check In
                       </button>
                     )}
-                    {selectedBooking.status === 'Checked_in' && (
+                    {!selectedBooking.checked_out && selectedBooking.status === 'Checked_in' && (
                       <button 
                         type="button" 
                         className="btn-submit-modal" 
@@ -1860,18 +1865,20 @@ function App() {
                         🧹 Mark as Cleaned
                       </button>
                     ) : (
-                      <button 
-                        type="button" 
-                        className="btn-cancel" 
-                        style={{ background: 'rgba(239, 68, 68, 0.1)', borderColor: 'rgba(239, 68, 68, 0.3)', color: '#ef4444' }}
-                        onClick={() => {
-                          setCancelRefundAmount(selectedBooking.advance_paid);
-                          setCancelPaymentMethod('Cash');
-                          setCancelModalOpen(true);
-                        }}
-                      >
-                        ❌ Cancel Reservation
-                      </button>
+                      !selectedBooking.checked_out && (
+                        <button 
+                          type="button" 
+                          className="btn-cancel" 
+                          style={{ background: 'rgba(239, 68, 68, 0.1)', borderColor: 'rgba(239, 68, 68, 0.3)', color: '#ef4444' }}
+                          onClick={() => {
+                            setCancelRefundAmount(selectedBooking.advance_paid);
+                            setCancelPaymentMethod('Cash');
+                            setCancelModalOpen(true);
+                          }}
+                        >
+                          ❌ Cancel Reservation
+                        </button>
+                      )
                     )}
                     
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: '12px', borderLeft: '1px solid rgba(255, 255, 255, 0.1)', paddingLeft: '12px' }}>
@@ -1888,10 +1895,12 @@ function App() {
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: '8px' }}>
-                    <button type="button" className="btn-submit-modal" onClick={() => {
-                      handleCloseInfoModal();
-                      handleOpenEditModal(selectedBooking);
-                    }}>✏️ Edit Details</button>
+                    {!selectedBooking.checked_out && (
+                      <button type="button" className="btn-submit-modal" onClick={() => {
+                        handleCloseInfoModal();
+                        handleOpenEditModal(selectedBooking);
+                      }}>✏️ Edit Details</button>
+                    )}
                     <button type="button" className="btn-cancel" onClick={handleCloseInfoModal}>Close</button>
                   </div>
                 </div>
