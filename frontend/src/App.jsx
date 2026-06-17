@@ -1551,7 +1551,7 @@ function App() {
                 ✏️ Edit Booking Details
               </div>
               
-              {contextMenu.booking.status === 'Booked' && (
+              {!contextMenu.booking.checked_out && (contextMenu.booking.status === 'Booked' || contextMenu.booking.status === 'dirty') && (
                 <div 
                   className="context-menu-item"
                   onClick={() => {
@@ -1563,7 +1563,7 @@ function App() {
                 </div>
               )}
               
-              {contextMenu.booking.status !== 'dirty' && (
+              {!contextMenu.booking.checked_out && contextMenu.booking.status !== 'dirty' && (
                 <div 
                   className="context-menu-item"
                   onClick={() => {
@@ -1578,7 +1578,7 @@ function App() {
                 </div>
               )}
 
-              {contextMenu.booking.status === 'Checked_in' && (
+              {!contextMenu.booking.checked_out && (contextMenu.booking.status === 'Checked_in' || contextMenu.booking.status === 'dirty') && (
                 <div 
                   className="context-menu-item"
                   onClick={() => {
@@ -1828,7 +1828,7 @@ function App() {
 
                 <div className="modal-actions" style={{ justifyContent: 'space-between', display: 'flex', width: '100%', borderTop: '1px solid rgba(255, 255, 255, 0.05)', paddingTop: '12px', marginTop: '12px' }}>
                   <div style={{ display: 'flex', gap: '8px' }}>
-                    {!selectedBooking.checked_out && selectedBooking.status === 'Booked' && (
+                    {!selectedBooking.checked_out && (selectedBooking.status === 'Booked' || selectedBooking.status === 'dirty') && (
                       <button 
                         type="button" 
                         className="btn-submit-modal" 
@@ -1838,7 +1838,7 @@ function App() {
                         🟢 Check In
                       </button>
                     )}
-                    {!selectedBooking.checked_out && selectedBooking.status === 'Checked_in' && (
+                    {!selectedBooking.checked_out && (selectedBooking.status === 'Checked_in' || selectedBooking.status === 'dirty') && (
                       <button 
                         type="button" 
                         className="btn-submit-modal" 
@@ -1852,7 +1852,7 @@ function App() {
                         🚪 Check Out
                       </button>
                     )}
-                    {selectedBooking.status === 'dirty' ? (
+                    {selectedBooking.status === 'dirty' && (
                       <button 
                         type="button" 
                         className="btn-submit-modal" 
@@ -1864,21 +1864,20 @@ function App() {
                       >
                         🧹 Mark as Cleaned
                       </button>
-                    ) : (
-                      !selectedBooking.checked_out && (
-                        <button 
-                          type="button" 
-                          className="btn-cancel" 
-                          style={{ background: 'rgba(239, 68, 68, 0.1)', borderColor: 'rgba(239, 68, 68, 0.3)', color: '#ef4444' }}
-                          onClick={() => {
-                            setCancelRefundAmount(selectedBooking.advance_paid);
-                            setCancelPaymentMethod('Cash');
-                            setCancelModalOpen(true);
-                          }}
-                        >
-                          ❌ Cancel Reservation
-                        </button>
-                      )
+                    )}
+                    {!selectedBooking.checked_out && selectedBooking.status !== 'dirty' && (
+                      <button 
+                        type="button" 
+                        className="btn-cancel" 
+                        style={{ background: 'rgba(239, 68, 68, 0.1)', borderColor: 'rgba(239, 68, 68, 0.3)', color: '#ef4444' }}
+                        onClick={() => {
+                          setCancelRefundAmount(selectedBooking.advance_paid);
+                          setCancelPaymentMethod('Cash');
+                          setCancelModalOpen(true);
+                        }}
+                      >
+                        ❌ Cancel Reservation
+                      </button>
                     )}
                     
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: '12px', borderLeft: '1px solid rgba(255, 255, 255, 0.1)', paddingLeft: '12px' }}>
