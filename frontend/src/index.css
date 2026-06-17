@@ -651,6 +651,15 @@ body {
 }
 .status-dirty .booking-badge { color: #f3f4f6; }
 
+.status-checked_out .booking-info-block,
+.status-checked-out .booking-info-block {
+  background: linear-gradient(135deg, #334155, #1e293b);
+  border-left: 4px solid #64748b;
+  opacity: 0.75;
+}
+.status-checked_out .booking-badge,
+.status-checked-out .booking-badge { color: #94a3b8; }
+
 
 
 /* Modal Styles */

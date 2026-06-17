@@ -861,16 +861,25 @@ function App() {
   const handleDeleteBooking = () => {
     const isDirty = newBooking.status === 'dirty';
     const confirmMsg = isDirty 
-      ? 'Are you sure you want to mark this room as cleaned and vacate it?' 
+      ? 'Are you sure you want to mark this room as cleaned?' 
       : 'Are you sure you want to cancel this reservation?';
     
     if (!window.confirm(confirmMsg)) return;
     
-    fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/${editingBookingId}/`, {
-      method: 'DELETE',
-      headers: {
-        'Authorization': `Token ${token}`
-      }
+    const url = `http://127.0.0.1:8000/api/my-hotel/bookings/${editingBookingId}/`;
+    const method = isDirty ? 'PUT' : 'DELETE';
+    const headers = {
+      'Authorization': `Token ${token}`
+    };
+    if (isDirty) {
+      headers['Content-Type'] = 'application/json';
+    }
+    const body = isDirty ? JSON.stringify({ status: 'Checked_out' }) : undefined;
+
+    fetch(url, {
+      method,
+      headers,
+      body
     })
       .then(async res => {
         if (!res.ok) {
@@ -879,7 +888,7 @@ function App() {
         }
       })
       .then(() => {
-        triggerToast(isDirty ? 'Room marked as cleaned and vacated!' : 'Reservation cancelled successfully!');
+        triggerToast(isDirty ? 'Room marked as cleaned!' : 'Reservation cancelled successfully!');
         // Refresh bookings
         fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/?hotel_code=${hotelCode}`, {
           headers: { 'Authorization': `Token ${token}` }
@@ -896,12 +905,14 @@ function App() {
   };
 
   const handleQuickMarkCleaned = (bookingId) => {
-    if (!window.confirm('Are you sure you want to mark this room as cleaned and vacate it?')) return;
+    if (!window.confirm('Are you sure you want to mark this room as cleaned?')) return;
     fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/${bookingId}/`, {
-      method: 'DELETE',
+      method: 'PUT',
       headers: {
+        'Content-Type': 'application/json',
         'Authorization': `Token ${token}`
-      }
+      },
+      body: JSON.stringify({ status: 'Checked_out' })
     })
       .then(async res => {
         if (!res.ok) {
@@ -910,7 +921,7 @@ function App() {
         }
       })
       .then(() => {
-        triggerToast('Room marked as cleaned and vacated!');
+        triggerToast('Room marked as cleaned!');
         // Refresh bookings
         fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/?hotel_code=${hotelCode}`, {
           headers: { 'Authorization': `Token ${token}` }
@@ -927,18 +938,10 @@ function App() {
   const handleUpdateCleanliness = async (newStatus) => {
     if (!selectedBooking) return;
     
-    if (newStatus === 'cleaned') {
-      handleCloseInfoModal();
-      handleQuickMarkCleaned(selectedBooking.id);
-      return;
-    }
-    
     let statusValue = newStatus;
     if (newStatus === 'clean') {
       const todayStr = formatDate(new Date());
       statusValue = selectedBooking.check_in <= todayStr ? 'Checked_in' : 'Booked';
-    } else if (newStatus === 'dirty') {
-      statusValue = 'dirty';
     }
     
     try {
@@ -955,7 +958,7 @@ function App() {
         throw new Error(data.detail || 'Failed to update status');
       }
       const updated = await res.json();
-      triggerToast(`Room status updated to ${newStatus === 'clean' ? 'Clean' : 'Dirty (Needs Cleaning)'}!`);
+      triggerToast(`Room status updated to ${statusValue === 'dirty' ? 'Dirty' : 'Clean'}!`);
       setSelectedBooking(updated);
       setBookings(prev => prev.map(b => b.id === updated.id ? updated : b));
       refreshBookings(updated.id);
@@ -967,62 +970,39 @@ function App() {
   const handleToggleCleanliness = async (booking) => {
     if (!booking) return;
     
+    let newStatus = 'dirty';
     if (booking.status === 'dirty') {
-      const confirmVacate = window.confirm(`Mark Room ${booking.room_number || ''} as Cleaned & Vacated?\n\n- Click [OK] to vacate the room (remove booking from grid).\n- Click [Cancel] to keep the booking active but mark the room as Clean.`);
-      if (confirmVacate) {
-        handleQuickMarkCleaned(booking.id);
-      } else {
-        const todayStr = formatDate(new Date());
-        const restoredStatus = booking.check_in <= todayStr ? 'Checked_in' : 'Booked';
-        try {
-          const res = await fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/${booking.id}/`, {
-            method: 'PUT',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Token ${token}`
-            },
-            body: JSON.stringify({ status: restoredStatus })
-          });
-          if (!res.ok) {
-            const data = await res.json();
-            throw new Error(data.detail || 'Failed to update status');
-          }
-          const updated = await res.json();
-          triggerToast('Room status restored to Clean!');
-          if (selectedBooking && selectedBooking.id === updated.id) {
-            setSelectedBooking(updated);
-          }
-          setBookings(prev => prev.map(b => b.id === updated.id ? updated : b));
-          refreshBookings(updated.id);
-        } catch (err) {
-          triggerToast(err.message);
-        }
-      }
+      newStatus = 'Checked_out';
+    } else if (booking.status === 'Checked_out') {
+      newStatus = 'dirty';
     } else {
-      if (!window.confirm(`Are you sure you want to mark Room ${booking.room_number || ''} as Dirty (Needs Cleaning)?`)) return;
-      try {
-        const res = await fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/${booking.id}/`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Token ${token}`
-          },
-          body: JSON.stringify({ status: 'dirty' })
-        });
-        if (!res.ok) {
-          const data = await res.json();
-          throw new Error(data.detail || 'Failed to update status');
-        }
-        const updated = await res.json();
-        triggerToast('Room status updated to Dirty (Needs Cleaning)!');
-        if (selectedBooking && selectedBooking.id === updated.id) {
-          setSelectedBooking(updated);
-        }
-        setBookings(prev => prev.map(b => b.id === updated.id ? updated : b));
-        refreshBookings(updated.id);
-      } catch (err) {
-        triggerToast(err.message);
+      newStatus = 'dirty';
+    }
+
+    if (!window.confirm(`Are you sure you want to mark Room ${booking.room_number || ''} as ${newStatus === 'Checked_out' ? 'Cleaned & Completed' : 'Dirty (Needs Cleaning)'}?`)) return;
+
+    try {
+      const res = await fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/${booking.id}/`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Token ${token}`
+        },
+        body: JSON.stringify({ status: newStatus })
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.detail || 'Failed to update status');
       }
+      const updated = await res.json();
+      triggerToast(`Room status updated to ${newStatus === 'Checked_out' ? 'Cleaned' : 'Dirty'}!`);
+      if (selectedBooking && selectedBooking.id === updated.id) {
+        setSelectedBooking(updated);
+      }
+      setBookings(prev => prev.map(b => b.id === updated.id ? updated : b));
+      refreshBookings(updated.id);
+    } catch (err) {
+      triggerToast(err.message);
     }
   };
 
@@ -1030,7 +1010,7 @@ function App() {
     const todayStr = formatDate(new Date());
     const activeOrDirtyBooking = bookings.find(b => 
       Number(b.room_id) === Number(room.id) && 
-      (b.status === 'dirty' || (b.check_in <= todayStr && b.check_out > todayStr))
+      (b.status === 'dirty' || (b.status !== 'Checked_out' && b.check_in <= todayStr && b.check_out > todayStr))
     );
 
     if (activeOrDirtyBooking) {
@@ -1135,13 +1115,31 @@ function App() {
                   <span 
                     className="booking-badge"
                     title={booking.status === 'dirty' ? "Click to mark as Clean / Cleaned" : "Click to mark as Dirty"}
-                    style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 4px', borderRadius: '4px', background: booking.status === 'dirty' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(34, 197, 94, 0.2)' }}
+                    style={{ 
+                      cursor: 'pointer', 
+                      display: 'inline-flex', 
+                      alignItems: 'center', 
+                      gap: '4px', 
+                      padding: '2px 4px', 
+                      borderRadius: '4px', 
+                      background: booking.status === 'dirty' 
+                        ? 'rgba(239, 68, 68, 0.2)' 
+                        : booking.status === 'Checked_out' 
+                          ? 'rgba(148, 163, 184, 0.2)' 
+                          : 'rgba(34, 197, 94, 0.2)' 
+                    }}
                     onClick={(e) => {
                       e.stopPropagation();
                       handleToggleCleanliness(booking);
                     }}
                   >
-                    {booking.status === 'dirty' ? '🧹 Needs Cleaning' : booking.status === 'Checked_in' ? '✨ Checked-In' : `✨ ${booking.status}`}
+                    {booking.status === 'dirty' 
+                      ? '🧹 Needs Cleaning' 
+                      : booking.status === 'Checked_in' 
+                        ? '✨ Checked-In' 
+                        : booking.status === 'Checked_out' 
+                          ? '✅ Checked-Out' 
+                          : `✨ ${booking.status}`}
                   </span>
                   <span className="booking-advance" style={booking.advance_status === 'Unpaid' ? { color: '#f87171', fontSize: '0.65rem', fontWeight: 'bold' } : {}}>
                     {booking.advance_status === 'Unpaid' ? 'Incomplete Advance' : `₹${parseFloat(booking.advance_paid).toLocaleString('en-IN')}`}
@@ -1543,7 +1541,7 @@ function App() {
                         style={newBooking.status === 'dirty' ? { background: 'rgba(34, 197, 94, 0.1)', borderColor: 'rgba(34, 197, 94, 0.3)', color: '#22c55e' } : { background: 'rgba(239, 68, 68, 0.1)', borderColor: 'rgba(239, 68, 68, 0.3)', color: '#ef4444' }} 
                         onClick={handleDeleteBooking}
                       >
-                        {newBooking.status === 'dirty' ? '🧹 Mark as Cleaned (Vacate Room)' : 'Cancel Reservation'}
+                        {newBooking.status === 'dirty' ? '🧹 Mark as Cleaned' : 'Cancel Reservation'}
                       </button>
                     ) : (
                       <div></div>
@@ -1638,7 +1636,7 @@ function App() {
                     handleQuickMarkCleaned(contextMenu.booking.id);
                   }}
                 >
-                  🧹 Mark as Cleaned (Vacate)
+                  🧹 Mark as Cleaned
                 </div>
               ) : (
                 <div 
@@ -1885,7 +1883,7 @@ function App() {
                           handleQuickMarkCleaned(selectedBooking.id);
                         }}
                       >
-                        🧹 Mark as Cleaned (Vacate)
+                        🧹 Mark as Cleaned
                       </button>
                     ) : (
                       <button 
@@ -1907,12 +1905,20 @@ function App() {
                       <select
                         className="input-control"
                         style={{ height: '30px', fontSize: '0.75rem', padding: '4px 8px', background: '#0f172a', width: '185px', color: '#fff', borderColor: 'rgba(255,255,255,0.15)', cursor: 'pointer' }}
-                        value={selectedBooking.status === 'dirty' ? 'dirty' : 'clean'}
+                        value={selectedBooking.status}
                         onChange={e => handleUpdateCleanliness(e.target.value)}
                       >
-                        <option value="clean">🧼 Clean (Occupied/Active)</option>
+                        {selectedBooking.status === 'Booked' && (
+                          <option value="Booked">🧼 Clean (Booked/Future)</option>
+                        )}
+                        {selectedBooking.status === 'Checked_in' && (
+                          <option value="Checked_in">🧼 Clean (Occupied/Active)</option>
+                        )}
+                        {selectedBooking.status !== 'Booked' && selectedBooking.status !== 'Checked_in' && (
+                          <option value="Checked_in">🧼 Clean (Occupied/Active)</option>
+                        )}
                         <option value="dirty">🧹 Dirty (Needs Cleaning)</option>
-                        <option value="cleaned">✨ Cleaned (Vacate Room)</option>
+                        <option value="Checked_out">✨ Cleaned & Completed (Checked-Out)</option>
                       </select>
                     </div>
                   </div>
