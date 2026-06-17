@@ -534,6 +534,20 @@ function App() {
       })
       .then(data => {
         triggerToast('Additional payment transaction logged successfully!');
+        
+        // Show payment receipt modal
+        const receipt = {
+          type: 'payment',
+          guestName: `${data.guest_first_name} ${data.guest_last_name}`,
+          roomNumber: data.room_number,
+          amount: parseFloat(paymentAmount),
+          paymentMethod: paymentMethod,
+          receiptId: paymentReceiptId,
+          timestamp: new Date().toLocaleString()
+        };
+        setReceiptData(receipt);
+        setReceiptModalOpen(true);
+
         setPaymentAmount('');
         setPaymentReceiptId('');
         setPaymentModalOpen(false);
@@ -606,10 +620,28 @@ function App() {
       });
       if (!checkoutRes.ok) throw new Error('Failed to check out booking');
       
+      const finalBooking = await checkoutRes.json();
+      
+      const receipt = {
+        type: 'total_bill',
+        guestName: `${finalBooking.guest_first_name} ${finalBooking.guest_last_name}`,
+        roomNumber: finalBooking.room_number,
+        stayCost: parseFloat(finalBooking.total_cost) - parseFloat(finalBooking.extra_charges || 0),
+        extraCharges: parseFloat(finalBooking.extra_charges || 0),
+        totalCost: parseFloat(finalBooking.total_cost),
+        amountPaid: outstanding > 0 ? outstanding : 0,
+        paymentMethod: checkoutPaymentMethod,
+        receiptId: checkoutReceiptId,
+        outstanding: parseFloat(finalBooking.outstanding_amount),
+        timestamp: new Date().toLocaleString()
+      };
+      
       triggerToast('Guest checked out successfully! Room status set to dirty.');
       setCheckoutModalOpen(false);
       setInfoModalOpen(false);
       setCheckoutReceiptId('');
+      setReceiptData(receipt);
+      setReceiptModalOpen(true);
       refreshBookings();
     } catch (err) {
       triggerToast(err.message);
@@ -788,6 +820,22 @@ function App() {
       })
       .then(data => {
         triggerToast(isEditMode ? 'Reservation updated successfully!' : 'Reservation created successfully!');
+        
+        // Show advance payment receipt if Paid
+        if (newBooking.advance_status === 'Paid' && advancePaidNum > 0) {
+          const receipt = {
+            type: 'payment',
+            guestName: `${data.guest_first_name} ${data.guest_last_name}`,
+            roomNumber: data.room_number,
+            amount: advancePaidNum,
+            paymentMethod: newBooking.payment_method,
+            receiptId: newBooking.receipt_id,
+            timestamp: new Date().toLocaleString()
+          };
+          setReceiptData(receipt);
+          setReceiptModalOpen(true);
+        }
+
         // Refresh bookings
         fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/?hotel_code=${hotelCode}`, {
           headers: { 'Authorization': `Token ${token}` }
