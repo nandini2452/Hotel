@@ -888,6 +888,35 @@ function App() {
       });
   };
 
+  const handleQuickMarkCleaned = (bookingId) => {
+    if (!window.confirm('Are you sure you want to mark this room as cleaned and vacate it?')) return;
+    fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/${bookingId}/`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Token ${token}`
+      }
+    })
+      .then(async res => {
+        if (!res.ok) {
+          const data = await res.json();
+          throw new Error(data.detail || 'Failed to process request');
+        }
+      })
+      .then(() => {
+        triggerToast('Room marked as cleaned and vacated!');
+        // Refresh bookings
+        fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/?hotel_code=${hotelCode}`, {
+          headers: { 'Authorization': `Token ${token}` }
+        })
+          .then(res => res.json())
+          .then(data => setBookings(data));
+      })
+      .catch(err => {
+        console.error(err);
+        triggerToast(err.message || 'Error occurred while processing request.');
+      });
+  };
+
   // Renders a horizontal row of cells matching the calendar dates
   const renderCalendarCells = (room) => {
     const cells = [];
@@ -1419,17 +1448,30 @@ function App() {
               
               <div className="context-menu-divider"></div>
               
-              <div 
-                className="context-menu-item danger"
-                onClick={() => {
-                  setCancelRefundAmount(contextMenu.booking.advance_paid);
-                  setCancelPaymentMethod('Cash');
-                  setCancelModalOpen(true);
-                  setContextMenu(prev => ({ ...prev, visible: false }));
-                }}
-              >
-                ❌ Cancel Reservation
-              </div>
+              {contextMenu.booking.status === 'dirty' ? (
+                <div 
+                  className="context-menu-item"
+                  style={{ color: '#4ade80' }}
+                  onClick={() => {
+                    setContextMenu(prev => ({ ...prev, visible: false }));
+                    handleQuickMarkCleaned(contextMenu.booking.id);
+                  }}
+                >
+                  🧹 Mark as Cleaned (Vacate)
+                </div>
+              ) : (
+                <div 
+                  className="context-menu-item danger"
+                  onClick={() => {
+                    setCancelRefundAmount(contextMenu.booking.advance_paid);
+                    setCancelPaymentMethod('Cash');
+                    setCancelModalOpen(true);
+                    setContextMenu(prev => ({ ...prev, visible: false }));
+                  }}
+                >
+                  ❌ Cancel Reservation
+                </div>
+              )}
             </div>
           )}
 
@@ -1652,18 +1694,32 @@ function App() {
                         🚪 Check Out
                       </button>
                     )}
-                    <button 
-                      type="button" 
-                      className="btn-cancel" 
-                      style={{ background: 'rgba(239, 68, 68, 0.1)', borderColor: 'rgba(239, 68, 68, 0.3)', color: '#ef4444' }}
-                      onClick={() => {
-                        setCancelRefundAmount(selectedBooking.advance_paid);
-                        setCancelPaymentMethod('Cash');
-                        setCancelModalOpen(true);
-                      }}
-                    >
-                      ❌ Cancel Reservation
-                    </button>
+                    {selectedBooking.status === 'dirty' ? (
+                      <button 
+                        type="button" 
+                        className="btn-submit-modal" 
+                        style={{ background: 'rgba(34, 197, 94, 0.1)', borderColor: 'rgba(34, 197, 94, 0.3)', color: '#22c55e' }}
+                        onClick={() => {
+                          handleCloseInfoModal();
+                          handleQuickMarkCleaned(selectedBooking.id);
+                        }}
+                      >
+                        🧹 Mark as Cleaned (Vacate)
+                      </button>
+                    ) : (
+                      <button 
+                        type="button" 
+                        className="btn-cancel" 
+                        style={{ background: 'rgba(239, 68, 68, 0.1)', borderColor: 'rgba(239, 68, 68, 0.3)', color: '#ef4444' }}
+                        onClick={() => {
+                          setCancelRefundAmount(selectedBooking.advance_paid);
+                          setCancelPaymentMethod('Cash');
+                          setCancelModalOpen(true);
+                        }}
+                      >
+                        ❌ Cancel Reservation
+                      </button>
+                    )}
                   </div>
                   <div style={{ display: 'flex', gap: '8px' }}>
                     <button type="button" className="btn-submit-modal" onClick={() => {
