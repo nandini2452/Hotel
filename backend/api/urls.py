@@ -9,4 +9,5 @@ urlpatterns = [
     path('my-hotel/bookings/', views.my_hotel_bookings, name='my_hotel_bookings'),
     path('my-hotel/bookings/<int:pk>/', views.my_hotel_booking_detail, name='my_hotel_booking_detail'),
     path('my-hotel/bookings/<int:pk>/transactions/', views.create_transaction, name='create_transaction'),
+    path('my-hotel/rooms/<int:pk>/', views.update_room_cleanliness, name='update_room_cleanliness'),
 ]

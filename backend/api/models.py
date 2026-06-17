@@ -23,15 +23,20 @@ class RoomType(models.Model):
         return f"{self.name} - {self.hotel.name} (₹{self.price})"
 
 class Room(models.Model):
+    CLEANLINESS_CHOICES = [
+        ('clean', 'Clean'),
+        ('dirty', 'Dirty'),
+    ]
     hotel = models.ForeignKey(Hotel, on_delete=models.CASCADE, related_name='rooms')
     number = models.CharField(max_length=50)
     room_type = models.ForeignKey(RoomType, on_delete=models.CASCADE, related_name='rooms')
+    cleanliness = models.CharField(max_length=20, choices=CLEANLINESS_CHOICES, default='clean')
 
     class Meta:
         unique_together = ('hotel', 'number')
 
     def __str__(self):
-        return f"{self.number} ({self.room_type.name}) - {self.hotel.name}"
+        return f"{self.number} ({self.room_type.name}) - {self.hotel.name} - Cleanliness: {self.cleanliness}"
 
 class Booking(models.Model):
     STATUS_CHOICES = [

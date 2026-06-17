@@ -130,7 +130,8 @@ def my_hotel_rooms(request):
             "number": r.number,
             "room_type": room_type_name,
             "price": r.room_type.price,
-            "min_advance": min_advance
+            "min_advance": min_advance,
+            "cleanliness": r.cleanliness
         })
     return Response(data, status=status.HTTP_200_OK)
 
@@ -303,6 +304,10 @@ def my_hotel_bookings(request):
             notes=notes
         )
 
+        # Sync room cleanliness to clean on new booking creation
+        room.cleanliness = 'clean'
+        room.save()
+
         # Create corresponding advance transaction if any payment was recorded
         if advance_paid_dec > 0:
             Transaction.objects.create(
@@ -399,6 +404,12 @@ def my_hotel_booking_detail(request, pk):
             booking.guest_email = guest_email
         if status_val:
             booking.status = status_val
+            if status_val == 'dirty':
+                booking.room.cleanliness = 'dirty'
+                booking.room.save()
+            elif status_val in ['Checked_in', 'Booked']:
+                booking.room.cleanliness = 'clean'
+                booking.room.save()
         if notes is not None:
             booking.notes = notes
         if extra_charges is not None:
@@ -567,3 +578,48 @@ def create_transaction(request, pk):
         "outstanding_amount": outstanding_amount,
         "transactions": txns_data
     }, status=status.HTTP_201_CREATED)
+
+@api_view(['PUT'])
+@permission_classes([IsAuthenticated])
+def update_room_cleanliness(request, pk):
+    """
+    Update a room's cleanliness status directly (independent of bookings).
+    """
+    user = request.user
+    try:
+        room = Room.objects.get(id=pk)
+    except Room.DoesNotExist:
+        return Response({"detail": "Room not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    hotel = room.hotel
+    is_owner = hotel.owner == user
+    is_manager = hotel.managers.filter(id=user.id).exists()
+    if not (is_owner or is_manager):
+        return Response({"detail": "Not authorized for this hotel."}, status=status.HTTP_403_FORBIDDEN)
+
+    cleanliness = request.data.get('cleanliness')
+    if cleanliness not in ['clean', 'dirty']:
+        return Response({"detail": "Invalid cleanliness value. Choose 'clean' or 'dirty'."}, status=status.HTTP_400_BAD_REQUEST)
+
+    room.cleanliness = cleanliness
+    room.save()
+
+    # Automatically sync today's active booking status if present
+    today = timezone.localtime(timezone.now()).date()
+    active_booking = Booking.objects.filter(
+        room=room,
+        check_in__date__lte=today,
+        check_out__date__gt=today
+    ).first()
+    if active_booking:
+        if cleanliness == 'dirty':
+            active_booking.status = 'dirty'
+        else:
+            active_booking.status = 'Checked_in'
+        active_booking.save()
+
+    return Response({
+        "id": room.id,
+        "number": room.number,
+        "cleanliness": room.cleanliness
+    }, status=status.HTTP_200_OK)

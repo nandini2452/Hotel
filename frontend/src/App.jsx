@@ -343,8 +343,19 @@ function App() {
     setSelectedBooking(null);
   };
 
+  const refreshRoomsList = () => {
+    if (!token || !hotelCode) return;
+    fetch(`http://127.0.0.1:8000/api/my-hotel/rooms/?hotel_code=${hotelCode}&_t=${Date.now()}`, {
+      headers: { 'Authorization': `Token ${token}` }
+    })
+      .then(res => res.json())
+      .then(data => setRooms(data))
+      .catch(err => console.error(err));
+  };
+
   const refreshBookings = (activeBookingId = null) => {
     const targetId = activeBookingId || (selectedBooking ? selectedBooking.id : null);
+    refreshRoomsList();
     fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/?hotel_code=${hotelCode}&_t=${Date.now()}`, {
       headers: { 'Authorization': `Token ${token}` }
     })
@@ -1016,51 +1027,65 @@ function App() {
     }
   };
 
-  const renderRoomCleanlinessEmoji = (room) => {
-    const todayStr = formatDate(new Date());
-    const activeOrDirtyBooking = bookings.find(b => 
-      Number(b.room_id) === Number(room.id) && 
-      (b.status === 'dirty' || (b.check_in <= todayStr && b.check_out > todayStr))
-    );
+  const handleToggleRoomCleanliness = async (room) => {
+    if (!room) return;
+    const newCleanliness = room.cleanliness === 'dirty' ? 'clean' : 'dirty';
+    if (!window.confirm(`Are you sure you want to mark Room ${room.number} as ${newCleanliness === 'clean' ? 'Clean' : 'Dirty (Needs Cleaning)'}?`)) return;
 
-    if (activeOrDirtyBooking) {
-      const isDirty = activeOrDirtyBooking.status === 'dirty';
-      return (
-        <span 
-          style={{ 
-            cursor: 'pointer', 
-            fontSize: '1.1rem', 
-            padding: '2px 6px', 
-            borderRadius: '4px',
-            background: isDirty ? 'rgba(239, 68, 68, 0.15)' : 'rgba(34, 197, 94, 0.15)',
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            transition: 'transform 0.15s ease',
-            marginLeft: '8px'
-          }}
-          title={isDirty ? "Room needs cleaning (Dirty). Click to mark as Clean!" : "Room is Clean. Click to mark as Dirty (Needs Cleaning)!"}
-          onClick={(e) => {
-            e.stopPropagation();
-            handleToggleCleanliness(activeOrDirtyBooking);
-          }}
-        >
-          {isDirty ? '🧹' : '✨'}
-        </span>
-      );
+    try {
+      const res = await fetch(`http://127.0.0.1:8000/api/my-hotel/rooms/${room.id}/`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Token ${token}`
+        },
+        body: JSON.stringify({ cleanliness: newCleanliness })
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.detail || 'Failed to update room cleanliness');
+      }
+      const updated = await res.json();
+      triggerToast(`Room ${room.number} cleanliness set to ${newCleanliness === 'clean' ? 'Clean' : 'Dirty'}!`);
+      
+      // Update room in state
+      setRooms(prev => prev.map(r => r.id === room.id ? { ...r, cleanliness: newCleanliness } : r));
+      
+      // Sync bookings list because backend view synced any active booking
+      fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/?hotel_code=${hotelCode}`, {
+        headers: { 'Authorization': `Token ${token}` }
+      })
+        .then(res => res.json())
+        .then(data => setBookings(data));
+        
+    } catch (err) {
+      triggerToast(err.message);
     }
+  };
 
+  const renderRoomCleanlinessEmoji = (room) => {
+    const isDirty = room.cleanliness === 'dirty';
     return (
       <span 
         style={{ 
+          cursor: 'pointer', 
           fontSize: '1.1rem', 
-          opacity: 0.5,
-          padding: '2px 6px',
+          padding: '2px 6px', 
+          borderRadius: '4px',
+          background: isDirty ? 'rgba(239, 68, 68, 0.15)' : 'rgba(34, 197, 94, 0.15)',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          transition: 'transform 0.15s ease',
           marginLeft: '8px'
         }}
-        title="Room is Vacant & Clean"
+        title={isDirty ? "Room is Dirty. Click to mark as Clean!" : "Room is Clean. Click to mark as Dirty!"}
+        onClick={(e) => {
+          e.stopPropagation();
+          handleToggleRoomCleanliness(room);
+        }}
       >
-        ✨
+        {isDirty ? '🧹' : '✨'}
       </span>
     );
   };
@@ -1161,13 +1186,26 @@ function App() {
         }
       } else {
         const targetDate = dates[i];
+        const isRoomDirty = room.cleanliness === 'dirty';
         cells.push(
           <td
             key={`empty-${room.id}-${dateStr}`}
-            className="empty-cell"
-            onClick={() => handleOpenReservationModal(room, targetDate)}
+            className={`empty-cell ${isRoomDirty ? 'dirty-vacant-cell' : ''}`}
+            onClick={() => {
+              if (isRoomDirty) {
+                const markClean = window.confirm(`Room ${room.number} is marked as Dirty. Do you want to mark it as Clean?\n\n- Click [OK] to mark as Clean.\n- Click [Cancel] to proceed with adding a reservation.`);
+                if (markClean) {
+                  handleToggleRoomCleanliness(room);
+                  return;
+                }
+              }
+              handleOpenReservationModal(room, targetDate);
+            }}
+            style={isRoomDirty ? { cursor: 'pointer', background: 'repeating-linear-gradient(45deg, rgba(153, 27, 27, 0.15), rgba(153, 27, 27, 0.15) 6px, rgba(69, 10, 10, 0.15) 6px, rgba(69, 10, 10, 0.15) 12px)' } : {}}
           >
-            <div className="empty-cell-inner">+</div>
+            <div className="empty-cell-inner" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+              {isRoomDirty ? <span style={{ fontSize: '0.85rem' }} title="Room needs cleaning">🧹</span> : '+'}
+            </div>
           </td>
         );
         i++;
