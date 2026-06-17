@@ -37,7 +37,6 @@ class Booking(models.Model):
     STATUS_CHOICES = [
         ('Booked', 'Booked'),
         ('Checked_in', 'Checked_in'),
-        ('Checked_out', 'Checked_out'),
         ('dirty', 'dirty'),
     ]
     room = models.ForeignKey(Room, on_delete=models.CASCADE, related_name='bookings')

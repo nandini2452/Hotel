@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 
 const TIME_OPTIONS = [
   '12:00 AM', '1:00 AM', '2:00 AM', '3:00 AM', '4:00 AM', '5:00 AM', '6:00 AM', '7:00 AM', '8:00 AM', '9:00 AM', '10:00 AM', '11:00 AM',
@@ -45,17 +45,18 @@ function App() {
     receipt_id: ''
   });
 
-  // 14-day rolling window calendar starting from today
-  const [dates] = useState(() => {
+  const [startDate, setStartDate] = useState(new Date());
+
+  // 14-day rolling window calendar starting from startDate
+  const dates = useMemo(() => {
     const arr = [];
-    const today = new Date();
     for (let i = 0; i < 14; i++) {
-      const d = new Date(today);
-      d.setDate(today.getDate() + i);
+      const d = new Date(startDate);
+      d.setDate(startDate.getDate() + i);
       arr.push(d);
     }
     return arr;
-  });
+  }, [startDate]);
   
   // Toast notifications state
   const [toasts, setToasts] = useState([]);
@@ -874,7 +875,10 @@ function App() {
     if (isDirty) {
       headers['Content-Type'] = 'application/json';
     }
-    const body = isDirty ? JSON.stringify({ status: 'Checked_out' }) : undefined;
+    
+    const todayStr = formatDate(new Date());
+    const restoredStatus = newBooking.check_in <= todayStr ? 'Checked_in' : 'Booked';
+    const body = isDirty ? JSON.stringify({ status: restoredStatus }) : undefined;
 
     fetch(url, {
       method,
@@ -905,14 +909,21 @@ function App() {
   };
 
   const handleQuickMarkCleaned = (bookingId) => {
+    const booking = bookings.find(b => b.id === bookingId);
+    if (!booking) return;
+    
     if (!window.confirm('Are you sure you want to mark this room as cleaned?')) return;
+    
+    const todayStr = formatDate(new Date());
+    const restoredStatus = booking.check_in <= todayStr ? 'Checked_in' : 'Booked';
+
     fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/${bookingId}/`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Token ${token}`
       },
-      body: JSON.stringify({ status: 'Checked_out' })
+      body: JSON.stringify({ status: restoredStatus })
     })
       .then(async res => {
         if (!res.ok) {
@@ -970,16 +981,15 @@ function App() {
   const handleToggleCleanliness = async (booking) => {
     if (!booking) return;
     
+    const todayStr = formatDate(new Date());
     let newStatus = 'dirty';
     if (booking.status === 'dirty') {
-      newStatus = 'Checked_out';
-    } else if (booking.status === 'Checked_out') {
-      newStatus = 'dirty';
+      newStatus = booking.check_in <= todayStr ? 'Checked_in' : 'Booked';
     } else {
       newStatus = 'dirty';
     }
 
-    if (!window.confirm(`Are you sure you want to mark Room ${booking.room_number || ''} as ${newStatus === 'Checked_out' ? 'Cleaned & Completed' : 'Dirty (Needs Cleaning)'}?`)) return;
+    if (!window.confirm(`Are you sure you want to mark Room ${booking.room_number || ''} as ${newStatus === 'dirty' ? 'Dirty (Needs Cleaning)' : 'Clean'}?`)) return;
 
     try {
       const res = await fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/${booking.id}/`, {
@@ -995,7 +1005,7 @@ function App() {
         throw new Error(data.detail || 'Failed to update status');
       }
       const updated = await res.json();
-      triggerToast(`Room status updated to ${newStatus === 'Checked_out' ? 'Cleaned' : 'Dirty'}!`);
+      triggerToast(`Room status updated to ${newStatus === 'dirty' ? 'Dirty' : 'Clean'}!`);
       if (selectedBooking && selectedBooking.id === updated.id) {
         setSelectedBooking(updated);
       }
@@ -1010,7 +1020,7 @@ function App() {
     const todayStr = formatDate(new Date());
     const activeOrDirtyBooking = bookings.find(b => 
       Number(b.room_id) === Number(room.id) && 
-      (b.status === 'dirty' || (b.status !== 'Checked_out' && b.check_in <= todayStr && b.check_out > todayStr))
+      (b.status === 'dirty' || (b.check_in <= todayStr && b.check_out > todayStr))
     );
 
     if (activeOrDirtyBooking) {
@@ -1114,7 +1124,7 @@ function App() {
                 <div className="booking-footer-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', marginTop: '4px' }}>
                   <span 
                     className="booking-badge"
-                    title={booking.status === 'dirty' ? "Click to mark as Clean / Cleaned" : "Click to mark as Dirty"}
+                    title={booking.status === 'dirty' ? "Click to mark as Clean" : "Click to mark as Dirty"}
                     style={{ 
                       cursor: 'pointer', 
                       display: 'inline-flex', 
@@ -1124,9 +1134,7 @@ function App() {
                       borderRadius: '4px', 
                       background: booking.status === 'dirty' 
                         ? 'rgba(239, 68, 68, 0.2)' 
-                        : booking.status === 'Checked_out' 
-                          ? 'rgba(148, 163, 184, 0.2)' 
-                          : 'rgba(34, 197, 94, 0.2)' 
+                        : 'rgba(34, 197, 94, 0.2)' 
                     }}
                     onClick={(e) => {
                       e.stopPropagation();
@@ -1137,9 +1145,7 @@ function App() {
                       ? '🧹 Needs Cleaning' 
                       : booking.status === 'Checked_in' 
                         ? '✨ Checked-In' 
-                        : booking.status === 'Checked_out' 
-                          ? '✅ Checked-Out' 
-                          : `✨ ${booking.status}`}
+                        : `✨ ${booking.status}`}
                   </span>
                   <span className="booking-advance" style={booking.advance_status === 'Unpaid' ? { color: '#f87171', fontSize: '0.65rem', fontWeight: 'bold' } : {}}>
                     {booking.advance_status === 'Unpaid' ? 'Incomplete Advance' : `₹${parseFloat(booking.advance_paid).toLocaleString('en-IN')}`}
@@ -1237,8 +1243,39 @@ function App() {
 
           {/* Front Desk Scheduler Grid */}
           <div className="calendar-card">
-            <div className="calendar-header-actions">
+            <div className="calendar-header-actions" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
               <h2>Front Desk Booking Calendar Grid</h2>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <button 
+                  className="btn-cancel" 
+                  style={{ padding: '6px 12px', fontSize: '0.75rem', background: 'rgba(255,255,255,0.08)', borderColor: 'rgba(255,255,255,0.15)', height: '30px', display: 'flex', alignItems: 'center' }}
+                  onClick={() => setStartDate(new Date())}
+                >
+                  📅 Today
+                </button>
+                <button 
+                  className="btn-cancel" 
+                  style={{ padding: '6px 12px', fontSize: '0.75rem', background: 'rgba(255,255,255,0.08)', borderColor: 'rgba(255,255,255,0.15)', height: '30px', display: 'flex', alignItems: 'center' }}
+                  onClick={() => {
+                    const prev = new Date(startDate);
+                    prev.setDate(prev.getDate() - 14);
+                    setStartDate(prev);
+                  }}
+                >
+                  ◀ 14 Days
+                </button>
+                <button 
+                  className="btn-cancel" 
+                  style={{ padding: '6px 12px', fontSize: '0.75rem', background: 'rgba(255,255,255,0.08)', borderColor: 'rgba(255,255,255,0.15)', height: '30px', display: 'flex', alignItems: 'center' }}
+                  onClick={() => {
+                    const next = new Date(startDate);
+                    next.setDate(next.getDate() + 14);
+                    setStartDate(next);
+                  }}
+                >
+                  14 Days ▶
+                </button>
+              </div>
               <div className="calendar-legend">
                 <div className="legend-item">
                   <div className="legend-color" style={{ background: 'linear-gradient(135deg, #2563eb, #1d4ed8)' }}></div>
@@ -1262,7 +1299,38 @@ function App() {
               <table className="calendar-table">
                 <thead>
                   <tr>
-                    <th className="room-column-header">Room Details</th>
+                    <th className="room-column-header">
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                        <span>Room Details</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }} title="Click calendar to book prior / choose date">
+                          <span style={{ fontSize: '0.85rem', color: '#60a5fa', cursor: 'pointer' }} onClick={() => {
+                            const dp = document.getElementById('calendar-jump-date-picker');
+                            if (dp && typeof dp.showPicker === 'function') dp.showPicker();
+                          }}>➕</span>
+                          <input 
+                            id="calendar-jump-date-picker"
+                            type="date"
+                            style={{ 
+                              background: '#0f172a',
+                              border: '1px solid rgba(255,255,255,0.15)',
+                              borderRadius: '4px',
+                              color: '#fff', 
+                              fontSize: '0.7rem', 
+                              outline: 'none', 
+                              cursor: 'pointer',
+                              padding: '2px 4px',
+                              width: '115px'
+                            }}
+                            value={startDate.toISOString().split('T')[0]} 
+                            onChange={(e) => {
+                              if (e.target.value) {
+                                setStartDate(new Date(e.target.value));
+                              }
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </th>
                     {dates.map((date, idx) => {
                       const isToday = idx === 0;
                       return (
@@ -1905,20 +1973,11 @@ function App() {
                       <select
                         className="input-control"
                         style={{ height: '30px', fontSize: '0.75rem', padding: '4px 8px', background: '#0f172a', width: '185px', color: '#fff', borderColor: 'rgba(255,255,255,0.15)', cursor: 'pointer' }}
-                        value={selectedBooking.status}
+                        value={selectedBooking.status === 'dirty' ? 'dirty' : 'clean'}
                         onChange={e => handleUpdateCleanliness(e.target.value)}
                       >
-                        {selectedBooking.status === 'Booked' && (
-                          <option value="Booked">🧼 Clean (Booked/Future)</option>
-                        )}
-                        {selectedBooking.status === 'Checked_in' && (
-                          <option value="Checked_in">🧼 Clean (Occupied/Active)</option>
-                        )}
-                        {selectedBooking.status !== 'Booked' && selectedBooking.status !== 'Checked_in' && (
-                          <option value="Checked_in">🧼 Clean (Occupied/Active)</option>
-                        )}
+                        <option value="clean">🧼 Clean</option>
                         <option value="dirty">🧹 Dirty (Needs Cleaning)</option>
-                        <option value="Checked_out">✨ Cleaned & Completed (Checked-Out)</option>
                       </select>
                     </div>
                   </div>
