@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  backend:
+    build: .
+    container_name: hotel_backend
+    ports:
+      - "8002:8002"
+    volumes:
+      # Mount the local db.sqlite3 file to persist database records on the host machine
+      - ./db.sqlite3:/app/db.sqlite3
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: always
