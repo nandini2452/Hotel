@@ -133,3 +133,38 @@ class TransactionReportingTests(APITestCase):
         self.assertEqual(booking_data['transactions'][1]['payment_method'], 'UPI')
         self.assertEqual(booking_data['transactions'][1]['receipt_id'], f"REF-{booking.id}")
 
+    def test_export_transactions_excel(self):
+        # 1. Create a booking and transactions
+        today = datetime.date.today()
+        tomorrow = today + datetime.timedelta(days=1)
+        booking = Booking.objects.create(
+            room=self.room,
+            customer=self.customer_profile,
+            guest_first_name="John",
+            guest_last_name="Doe",
+            guest_phone="9999999999",
+            guest_email="customer@example.com",
+            check_in=today,
+            check_out=tomorrow,
+            status="Checked_in",
+            extra_charges=150.00,
+            extra_charges_reason="Late Checkout"
+        )
+        Transaction.objects.create(
+            booking=booking,
+            amount=2000.00,
+            payment_method="Cash",
+            receipt_id="REC-EXCEL-TEST"
+        )
+
+        # 2. Request Excel Export
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.manager_token.key}')
+        export_url = f"/api/my-hotel/transactions/export/?hotel_code={self.hotel.code}&filter=today"
+        response = self.client.get(export_url)
+
+        # 3. Assert Excel Sheet Output Type
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response['Content-Type'], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        self.assertTrue(len(response.content) > 0)
+
+

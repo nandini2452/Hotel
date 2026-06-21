@@ -599,31 +599,37 @@ function App() {
     };
   }, [filteredTransactions]);
 
-  const handleExportCSV = () => {
-    const headers = ['Date & Time', 'Guest Name', 'Room', 'Type', 'Payment Method', 'Receipt ID', 'Amount (INR)'];
-    const rows = filteredTransactions.map(t => {
-      const amt = parseFloat(t.amount);
-      const isRefund = amt < 0;
-      return [
-        t.created_at,
-        t.guestName,
-        `Room ${t.roomNumber} (${t.roomType}) ${t.bookingExtraChargesReason ? `[Incid: ${t.bookingExtraChargesReason}]` : ''}`,
-        isRefund ? 'Refund' : 'Booking Payment',
-        t.payment_method,
-        t.receipt_id || '-',
-        amt
-      ];
+  const handleExportExcel = () => {
+    const queryParams = new URLSearchParams({
+      hotel_code: hotelCode,
+      filter: txnFilter,
+      start_date: txnStartDate || '',
+      end_date: txnEndDate || ''
     });
-    const csvContent = "\uFEFF" + [headers.join(','), ...rows.map(r => r.map(val => `"${String(val).replace(/"/g, '""')}"`).join(','))].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    link.setAttribute("download", `transactions_${txnFilter}_${txnStartDate || 'start'}_to_${txnEndDate || 'end'}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    
+    fetch(`http://127.0.0.1:8000/api/my-hotel/transactions/export/?${queryParams.toString()}`, {
+      headers: {
+        'Authorization': `Token ${token}`
+      }
+    })
+      .then(async res => {
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.detail || 'Failed to export Excel report');
+        }
+        return res.blob();
+      })
+      .then(blob => {
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.setAttribute("download", `transactions_${hotelCode}_${txnFilter || 'all'}.xlsx`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+      })
+      .catch(err => triggerToast(err.message));
   };
 
   const handlePrintPDF = () => {
@@ -2710,7 +2716,7 @@ function App() {
 
                     {/* Export Buttons */}
                     <button
-                      onClick={handleExportCSV}
+                      onClick={handleExportExcel}
                       style={{
                         background: 'rgba(16, 185, 129, 0.15)',
                         border: '1px solid rgba(16, 185, 129, 0.3)',
@@ -2726,7 +2732,7 @@ function App() {
                         transition: 'all 0.2s ease',
                         height: '32px'
                       }}
-                      title="Export transactions as CSV for Excel"
+                      title="Download native Excel (.xlsx) spreadsheet from backend"
                     >
                       📥 Excel Export
                     </button>

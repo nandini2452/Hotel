@@ -924,3 +924,305 @@ def update_room_cleanliness(request, pk):
         "number": room.number,
         "cleanliness": room.cleanliness
     }, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def export_transactions_excel(request):
+    """
+    Generate and download a formatted Excel spreadsheet (.xlsx) of transactions
+    filtered by today, yesterday, or custom date range in India timezone (+05:30).
+    """
+    import openpyxl
+    from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+    from openpyxl.utils import get_column_letter
+    from django.http import HttpResponse
+    import datetime
+
+    user = request.user
+    hotel_code = request.query_params.get('hotel_code')
+    if not hotel_code:
+        return Response({"detail": "hotel_code query parameter is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        hotel = Hotel.objects.get(code=hotel_code)
+    except Hotel.DoesNotExist:
+        return Response({"detail": "Hotel not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    # Authorization Check
+    is_owner = hotel.owner == user
+    is_manager = hotel.managers.filter(id=user.id).exists()
+    if not (is_owner or is_manager):
+        return Response({"detail": "Not authorized for this hotel."}, status=status.HTTP_403_FORBIDDEN)
+
+    # Fetch bookings for this hotel
+    bookings = Booking.objects.filter(room__hotel=hotel)
+    
+    # We want to pull all transactions for these bookings
+    txns = Transaction.objects.filter(booking__in=bookings).order_by('created_at')
+
+    # Get local dates (Indian Standard Time UTC + 5:30)
+    tz_shift = datetime.timedelta(hours=5, minutes=30)
+    
+    # Parse filter params
+    txn_filter = request.query_params.get('filter', 'all')
+    start_date_str = request.query_params.get('start_date')
+    end_date_str = request.query_params.get('end_date')
+
+    today_local = (timezone.now() + tz_shift).date()
+    yesterday_local = today_local - datetime.timedelta(days=1)
+
+    filtered_txns = []
+    for t in txns:
+        local_created = t.created_at + tz_shift
+        local_date = local_created.date()
+        
+        # Apply filter matching frontend logic
+        if txn_filter == 'today':
+            if local_date != today_local:
+                continue
+        elif txn_filter == 'yesterday':
+            if local_date != yesterday_local:
+                continue
+        elif txn_filter == 'custom':
+            if start_date_str:
+                try:
+                    start_date = datetime.datetime.strptime(start_date_str, '%Y-%m-%d').date()
+                    if local_date < start_date:
+                        continue
+                except ValueError:
+                    pass
+            if end_date_str:
+                try:
+                    end_date = datetime.datetime.strptime(end_date_str, '%Y-%m-%d').date()
+                    if local_date > end_date:
+                        continue
+                except ValueError:
+                    pass
+        
+        b = t.booking
+        filtered_txns.append({
+            "txn": t,
+            "local_datetime": local_created,
+            "guest_name": f"{b.guest_first_name} {b.guest_last_name}",
+            "room_info": f"Room {b.room.number} ({b.room.room_type.name})",
+            "incidental_reason": b.extra_charges_reason,
+            "amount": float(t.amount)
+        })
+
+    # Summary calculations
+    unique_bookings = set(item['txn'].booking_id for item in filtered_txns if item['amount'] > 0)
+    unique_refunds = set(item['txn'].booking_id for item in filtered_txns if item['amount'] < 0)
+    
+    total_booking_amt = sum(item['amount'] for item in filtered_txns if item['amount'] > 0)
+    total_refund_amt = sum(abs(item['amount']) for item in filtered_txns if item['amount'] < 0)
+    net_income = total_booking_amt - total_refund_amt
+
+    # Create Workbook
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Transactions Report"
+    
+    # Ensure gridlines are visible
+    ws.views.sheetView[0].showGridLines = True
+
+    # Styling Palettes
+    navy_fill = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
+    title_font = Font(name="Calibri", size=16, bold=True, color="1E1B4B")
+    subtitle_font = Font(name="Calibri", size=11, italic=True, color="475569")
+    bold_font = Font(name="Calibri", size=11, bold=True)
+    normal_font = Font(name="Calibri", size=11)
+    
+    green_text = Font(name="Calibri", size=11, bold=True, color="16A34A")
+    red_text = Font(name="Calibri", size=11, bold=True, color="DC2626")
+    
+    center_align = Alignment(horizontal="center", vertical="center")
+    left_align = Alignment(horizontal="left", vertical="center")
+    right_align = Alignment(horizontal="right", vertical="center")
+    
+    thin_border = Border(
+        left=Side(style='thin', color='CBD5E1'),
+        right=Side(style='thin', color='CBD5E1'),
+        top=Side(style='thin', color='CBD5E1'),
+        bottom=Side(style='thin', color='CBD5E1')
+    )
+    
+    double_bottom_border = Border(
+        top=Side(style='thin', color='94A3B8'),
+        bottom=Side(style='double', color='1E293B')
+    )
+
+    # 1. Title Block
+    ws['A1'] = "FINANCIAL TRANSACTIONS REPORT"
+    ws['A1'].font = title_font
+    ws['A1'].alignment = left_align
+    
+    ws['A2'] = f"Hotel Name: {hotel.name} ({hotel.code})"
+    ws['A2'].font = subtitle_font
+    
+    range_desc = "All Recorded Transactions"
+    if txn_filter == 'today':
+        range_desc = f"Today ({today_local.strftime('%Y-%m-%d')})"
+    elif txn_filter == 'yesterday':
+        range_desc = f"Yesterday ({yesterday_local.strftime('%Y-%m-%d')})"
+    elif txn_filter == 'custom':
+        range_desc = f"Range: {start_date_str or 'Start'} to {end_date_str or 'End'}"
+    ws['A3'] = f"Report Interval: {range_desc}"
+    ws['A3'].font = subtitle_font
+    
+    ws['A4'] = f"Generated On: {(timezone.now() + tz_shift).strftime('%Y-%m-%d %I:%M %p')}"
+    ws['A4'].font = subtitle_font
+
+    # 2. Summary Block
+    ws['A6'] = "FINANCIAL SUMMARY"
+    ws['A6'].font = Font(name="Calibri", size=12, bold=True, color="1E293B")
+    
+    summary_headers = ["Metric", "Count", "Total Value (INR)"]
+    for col_idx, header in enumerate(summary_headers, start=1):
+        cell = ws.cell(row=7, column=col_idx, value=header)
+        cell.font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+        cell.fill = navy_fill
+        cell.alignment = center_align
+        cell.border = thin_border
+        
+    metrics = [
+        ("Booking Payments", len(unique_bookings), total_booking_amt, green_text),
+        ("Refunds Issued", len(unique_refunds), -total_refund_amt, red_text),
+        ("Net Settlements", "", net_income, bold_font)
+    ]
+    
+    for row_offset, (label, count, val, val_style) in enumerate(metrics, start=8):
+        c_label = ws.cell(row=row_offset, column=1, value=label)
+        c_count = ws.cell(row=row_offset, column=2, value=count)
+        c_val = ws.cell(row=row_offset, column=3, value=val)
+        
+        c_label.font = bold_font
+        c_count.font = normal_font
+        c_val.font = val_style if val_style else normal_font
+        
+        c_label.alignment = left_align
+        c_count.alignment = center_align
+        c_val.alignment = right_align
+        
+        c_label.border = thin_border
+        c_count.border = thin_border
+        c_val.border = thin_border
+        
+        c_val.number_format = '[$₹-437] #,##0.00'
+
+    # 3. Detailed Transactions Table
+    start_row = 13
+    ws.cell(row=start_row-1, column=1, value="DETAILED TRANSACTION LEDGER").font = Font(name="Calibri", size=12, bold=True, color="1E293B")
+    
+    headers = [
+        "Date & Time", 
+        "Guest Name", 
+        "Room Info", 
+        "Type", 
+        "Method", 
+        "Receipt/Txn ID", 
+        "Amount (INR)"
+    ]
+    
+    for col_idx, header in enumerate(headers, start=1):
+        cell = ws.cell(row=start_row, column=col_idx, value=header)
+        cell.font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+        cell.fill = navy_fill
+        cell.alignment = center_align
+        cell.border = thin_border
+
+    current_row = start_row + 1
+    for idx, item in enumerate(filtered_txns):
+        t = item['txn']
+        is_refund = item['amount'] < 0
+        type_str = "Refund" if is_refund else "Booking Payment"
+        
+        r_dt = ws.cell(row=current_row, column=1, value=item['local_datetime'].strftime('%Y-%m-%d %I:%M %p'))
+        r_name = ws.cell(row=current_row, column=2, value=item['guest_name'])
+        
+        room_desc = item['room_info']
+        if item['incidental_reason']:
+            room_desc += f" [Incid: {item['incidental_reason']}]"
+        r_room = ws.cell(row=current_row, column=3, value=room_desc)
+        
+        r_type = ws.cell(row=current_row, column=4, value=type_str)
+        r_method = ws.cell(row=current_row, column=5, value=t.payment_method)
+        r_receipt = ws.cell(row=current_row, column=6, value=t.receipt_id or "-")
+        r_amt = ws.cell(row=current_row, column=7, value=item['amount'])
+        
+        r_dt.alignment = center_align
+        r_name.alignment = left_align
+        r_room.alignment = left_align
+        r_type.alignment = center_align
+        r_method.alignment = center_align
+        r_receipt.alignment = center_align
+        r_amt.alignment = right_align
+        
+        for c in range(1, 8):
+            cell = ws.cell(row=current_row, column=c)
+            cell.border = thin_border
+            cell.font = normal_font
+            
+        if is_refund:
+            r_type.font = Font(name="Calibri", size=11, bold=True, color="DC2626")
+            r_amt.font = Font(name="Calibri", size=11, color="DC2626")
+        else:
+            r_type.font = normal_font
+            r_amt.font = Font(name="Calibri", size=11, color="16A34A")
+            
+        r_amt.number_format = '[$₹-437] #,##0.00'
+        current_row += 1
+
+    if filtered_txns:
+        ws.cell(row=current_row, column=1, value="Total Net Income").font = bold_font
+        ws.cell(row=current_row, column=1).alignment = left_align
+        
+        ws.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=6)
+        
+        for c in range(1, 7):
+            cell = ws.cell(row=current_row, column=c)
+            cell.border = double_bottom_border
+            
+        r_total_val = ws.cell(row=current_row, column=7, value=f"=SUM(G{start_row+1}:G{current_row-1})")
+        r_total_val.font = bold_font
+        r_total_val.alignment = right_align
+        r_total_val.border = double_bottom_border
+        r_total_val.number_format = '[$₹-437] #,##0.00'
+    else:
+        ws.cell(row=current_row, column=1, value="No transactions found for the selected range.").font = subtitle_font
+        ws.cell(row=current_row, column=1).alignment = center_align
+        ws.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=7)
+        for c in range(1, 8):
+            ws.cell(row=current_row, column=c).border = thin_border
+
+    # Auto-adjust column dimensions
+    for col in ws.columns:
+        max_len = 0
+        col_letter = get_column_letter(col[0].column)
+        for cell in col:
+            # check if cell is merged
+            is_merged = False
+            for merged_range in ws.merged_cells.ranges:
+                if cell.coordinate in merged_range:
+                    # if it's not the top-left cell, ignore it for width
+                    if cell.coordinate != merged_range.start_cell.coordinate:
+                        is_merged = True
+                    break
+            if is_merged:
+                continue
+                
+            val_str = str(cell.value or '')
+            if '₹' in val_str or '=' in val_str:
+                max_len = max(max_len, 14)
+            else:
+                max_len = max(max_len, len(val_str))
+        ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
+
+    # Build response
+    response = HttpResponse(content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    filename = f"transactions_{hotel_code}_{txn_filter}.xlsx"
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    
+    wb.save(response)
+    return response
+
