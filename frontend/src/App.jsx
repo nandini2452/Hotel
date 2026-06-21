@@ -67,7 +67,7 @@ function App() {
     check_out: '',
     check_out_time: '11:30 AM',
     status: 'Booked',
-    advance_paid: '',
+    advance_paid: 500,
     advance_status: 'Unpaid',
     payment_method: 'Cash',
     receipt_id: '',
@@ -111,6 +111,7 @@ function App() {
   const [extraChargesInput, setExtraChargesInput] = useState('');
   const [amountToPayInput, setAmountToPayInput] = useState('');
   const [extraAmountInput, setExtraAmountInput] = useState('0');
+  const [extraAmountReasonInput, setExtraAmountReasonInput] = useState('');
 
   // Checkout modal state
   const [checkoutModalOpen, setCheckoutModalOpen] = useState(false);
@@ -121,10 +122,42 @@ function App() {
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [cancelRefundAmount, setCancelRefundAmount] = useState('');
   const [cancelPaymentMethod, setCancelPaymentMethod] = useState('Cash');
+  const [rejectionReason, setRejectionReason] = useState('Rooms not available');
+  const [customRejectionReason, setCustomRejectionReason] = useState('');
 
   // Cancellation receipt state
   const [receiptModalOpen, setReceiptModalOpen] = useState(false);
   const [receiptData, setReceiptData] = useState(null);
+
+  // Customer Payment Quick Record states
+  const [customerPaymentBooking, setCustomerPaymentBooking] = useState(null);
+  const [customerPaymentAmount, setCustomerPaymentAmount] = useState('');
+  const [customerPaymentMethod, setCustomerPaymentMethod] = useState('UPI');
+  const [customerPaymentReceiptId, setCustomerPaymentReceiptId] = useState('');
+  const [customerPaymentModalOpen, setCustomerPaymentModalOpen] = useState(false);
+
+  // Financial reports state
+  const [txnFilter, setTxnFilter] = useState('today');
+  const [txnStartDate, setTxnStartDate] = useState('');
+  const [txnEndDate, setTxnEndDate] = useState('');
+  const [managerTab, setManagerTab] = useState('calendar'); // 'calendar' or 'transactions'
+  const [extraChargesAlertBooking, setExtraChargesAlertBooking] = useState(null);
+  const [seenAlerts, setSeenAlerts] = useState({});
+
+  useEffect(() => {
+    if (userRole === 'customer' && bookings.length > 0) {
+      const alertTarget = bookings.find(b => 
+        (b.status === 'Booked' || b.status === 'Checked_in') && 
+        parseFloat(b.extra_charges || 0) > 0 && 
+        parseFloat(b.outstanding_amount || 0) > 0 &&
+        parseFloat(b.extra_charges || 0) > (seenAlerts[b.id] || 0)
+      );
+      if (alertTarget) {
+        setExtraChargesAlertBooking(alertTarget);
+        setSeenAlerts(prev => ({ ...prev, [alertTarget.id]: parseFloat(alertTarget.extra_charges || 0) }));
+      }
+    }
+  }, [bookings, userRole, seenAlerts]);
 
   useEffect(() => {
     const handleGlobalClick = () => {
@@ -139,18 +172,22 @@ function App() {
   // Pre-fill customer details if logged in as customer
   useEffect(() => {
     if (token && userRole === 'customer') {
-      setNewBooking(prev => ({
-        ...prev,
-        guest_email: loggedInUser,
-        guest_first_name: prev.guest_first_name || '',
-        guest_last_name: prev.guest_last_name || '',
-        guest_phone: prev.guest_phone || '',
-        room_type: prev.room_type || 'Standard',
-        check_in: prev.check_in || '',
-        check_out: prev.check_out || '',
-        advance_paid: prev.advance_paid || '',
-        advance_status: 'Unpaid'
-      }));
+      setNewBooking(prev => {
+        const currentType = prev.room_type || 'Standard';
+        const defaultMinAdv = ROOM_TYPE_METADATA[currentType]?.minAdvance || 500;
+        return {
+          ...prev,
+          guest_email: loggedInUser,
+          guest_first_name: prev.guest_first_name || '',
+          guest_last_name: prev.guest_last_name || '',
+          guest_phone: prev.guest_phone || '',
+          room_type: currentType,
+          check_in: prev.check_in || '',
+          check_out: prev.check_out || '',
+          advance_paid: prev.advance_paid !== '' ? prev.advance_paid : defaultMinAdv,
+          advance_status: 'Unpaid'
+        };
+      });
     }
   }, [token, userRole, loggedInUser]);
 
@@ -427,6 +464,7 @@ function App() {
     setEditingBookingId(booking.id);
     
     setNewBooking({
+      room_id: booking.room_id,
       guest_first_name: booking.guest_first_name,
       guest_last_name: booking.guest_last_name,
       guest_phone: booking.guest_phone,
@@ -483,6 +521,352 @@ function App() {
       });
   };
 
+  // Aggregate all transactions across all bookings
+  const allTransactions = useMemo(() => {
+    let txns = [];
+    bookings.forEach(b => {
+      if (b.transactions && b.transactions.length > 0) {
+        b.transactions.forEach(t => {
+          txns.push({
+            ...t,
+            bookingId: b.id,
+            guestName: `${b.guest_first_name} ${b.guest_last_name}`,
+            roomNumber: b.room_number,
+            roomType: b.room_type,
+            bookingStatus: b.status,
+            bookingCheckIn: b.check_in,
+            bookingCheckOut: b.check_out,
+            bookingExtraChargesReason: b.extra_charges_reason
+          });
+        });
+      }
+    });
+    // Sort descending by timestamp / created_at
+    return txns.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  }, [bookings]);
+
+  // Date range filtering
+  const filteredTransactions = useMemo(() => {
+    const getLocalDateStr = (d) => {
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+
+    const todayStr = getLocalDateStr(new Date());
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = getLocalDateStr(yesterday);
+
+    return allTransactions.filter(t => {
+      const txnDate = t.created_at.split(' ')[0]; // YYYY-MM-DD
+      
+      if (txnFilter === 'today') {
+        return txnDate === todayStr;
+      } else if (txnFilter === 'yesterday') {
+        return txnDate === yesterdayStr;
+      } else if (txnFilter === 'custom') {
+        let match = true;
+        if (txnStartDate) {
+          match = match && txnDate >= txnStartDate;
+        }
+        if (txnEndDate) {
+          match = match && txnDate <= txnEndDate;
+        }
+        return match;
+      }
+      return true;
+    });
+  }, [allTransactions, txnFilter, txnStartDate, txnEndDate]);
+
+  // Transaction summary calculations
+  const txnSummary = useMemo(() => {
+    const bookingTxns = filteredTransactions.filter(t => parseFloat(t.amount) > 0);
+    const refundTxns = filteredTransactions.filter(t => parseFloat(t.amount) < 0);
+
+    const totalBookingAmount = bookingTxns.reduce((sum, t) => sum + parseFloat(t.amount), 0);
+    const totalRefundAmount = refundTxns.reduce((sum, t) => sum + Math.abs(parseFloat(t.amount)), 0);
+
+    const uniqueBookingIds = new Set(bookingTxns.map(t => t.bookingId));
+    const uniqueRefundIds = new Set(refundTxns.map(t => t.bookingId));
+
+    return {
+      bookingCount: uniqueBookingIds.size,
+      refundCount: uniqueRefundIds.size,
+      totalBookingAmount,
+      totalRefundAmount
+    };
+  }, [filteredTransactions]);
+
+  const handleExportCSV = () => {
+    const headers = ['Date & Time', 'Guest Name', 'Room', 'Type', 'Payment Method', 'Receipt ID', 'Amount (INR)'];
+    const rows = filteredTransactions.map(t => {
+      const amt = parseFloat(t.amount);
+      const isRefund = amt < 0;
+      return [
+        t.created_at,
+        t.guestName,
+        `Room ${t.roomNumber} (${t.roomType}) ${t.bookingExtraChargesReason ? `[Incid: ${t.bookingExtraChargesReason}]` : ''}`,
+        isRefund ? 'Refund' : 'Booking Payment',
+        t.payment_method,
+        t.receipt_id || '-',
+        amt
+      ];
+    });
+    const csvContent = "\uFEFF" + [headers.join(','), ...rows.map(r => r.map(val => `"${String(val).replace(/"/g, '""')}"`).join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `transactions_${txnFilter}_${txnStartDate || 'start'}_to_${txnEndDate || 'end'}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const handlePrintPDF = () => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      triggerToast('Popup blocked! Please allow popups to download PDF reports.');
+      return;
+    }
+
+    // Pre-evaluate the transaction rows to prevent any raw code text from rendering in the PDF window
+    const rowsHtml = filteredTransactions.length === 0
+      ? `<tr>
+           <td colspan="7" style="text-align: center; color: #64748b; padding: 30px; font-size: 14px;">No transactions recorded.</td>
+         </tr>`
+      : filteredTransactions.map(t => {
+          const amt = parseFloat(t.amount);
+          const isRefund = amt < 0;
+          return `
+            <tr style="border-bottom: 1px solid #e2e8f0;">
+              <td style="padding: 12px 16px; color: #475569;">${t.created_at}</td>
+              <td style="padding: 12px 16px; font-weight: 600; color: #0f172a;">${t.guestName}</td>
+              <td style="padding: 12px 16px; color: #475569;">
+                Room ${t.roomNumber} (${t.roomType})
+                ${t.bookingExtraChargesReason ? `<div style="font-size: 10px; color: #8b5cf6; margin-top: 2px;">Incid: ${t.bookingExtraChargesReason}</div>` : ''}
+              </td>
+              <td style="padding: 12px 16px;">
+                <span class="badge ${isRefund ? 'badge-refund' : 'badge-payment'}">
+                  ${isRefund ? 'Refund' : 'Booking Payment'}
+                </span>
+              </td>
+              <td style="padding: 12px 16px; color: #475569;">${t.payment_method}</td>
+              <td style="padding: 12px 16px; color: #64748b; font-family: monospace; font-size: 11px;">${t.receipt_id || '-'}</td>
+              <td style="padding: 12px 16px; text-align: right; font-weight: bold; color: ${isRefund ? '#b91c1c' : '#15803d'}; font-size: 13px;">
+                ${isRefund ? '-' : ''}₹${Math.abs(amt).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              </td>
+            </tr>
+          `;
+        }).join('');
+
+    const html = `
+      <html>
+        <head>
+          <title>Financial Summary Report - ${hotelName}</title>
+          <style>
+            body { 
+              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
+              color: #1e293b; 
+              padding: 40px; 
+              line-height: 1.6;
+              max-width: 1000px;
+              margin: 0 auto;
+            }
+            .header-table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-bottom: 30px;
+            }
+            .header-title-cell {
+              vertical-align: top;
+            }
+            .header-info-cell {
+              text-align: right;
+              vertical-align: top;
+              color: #475569;
+              font-size: 13px;
+            }
+            .header-title-cell h1 { 
+              margin: 0 0 8px 0; 
+              color: #7c3aed; 
+              font-size: 28px;
+              font-weight: 800;
+              letter-spacing: -0.025em;
+            }
+            .header-title-cell p { 
+              margin: 0; 
+              color: #64748b; 
+              font-size: 14px; 
+            }
+            .divider {
+              height: 2px;
+              background: linear-gradient(90deg, #8b5cf6, #ec4899);
+              margin-bottom: 30px;
+            }
+            .summary-title {
+              font-size: 16px;
+              font-weight: 700;
+              color: #0f172a;
+              margin-bottom: 12px;
+              text-transform: uppercase;
+              letter-spacing: 0.05em;
+            }
+            .summary-grid { 
+              display: grid; 
+              grid-template-columns: repeat(4, 1fr); 
+              gap: 16px; 
+              margin-bottom: 40px; 
+            }
+            .summary-card { 
+              background: #f8fafc; 
+              border: 1px solid #e2e8f0; 
+              padding: 20px; 
+              border-radius: 12px;
+              box-shadow: 0 1px 3px 0 rgba(0,0,0,0.05);
+            }
+            .summary-card .label { 
+              font-size: 11px; 
+              color: #64748b; 
+              text-transform: uppercase; 
+              font-weight: 600;
+              letter-spacing: 0.05em;
+              margin-bottom: 6px; 
+            }
+            .summary-card .value { 
+              font-size: 22px; 
+              font-weight: 700; 
+              color: #0f172a; 
+            }
+            .table-title {
+              font-size: 16px;
+              font-weight: 700;
+              color: #0f172a;
+              margin-bottom: 16px;
+              text-transform: uppercase;
+              letter-spacing: 0.05em;
+            }
+            table { 
+              width: 100%; 
+              border-collapse: collapse; 
+            }
+            th { 
+              background: #f1f5f9; 
+              padding: 12px 16px; 
+              text-align: left; 
+              font-size: 12px; 
+              font-weight: 700; 
+              color: #475569;
+              text-transform: uppercase;
+              letter-spacing: 0.05em;
+              border-bottom: 2px solid #e2e8f0; 
+            }
+            .badge { 
+              display: inline-block; 
+              padding: 4px 8px; 
+              border-radius: 6px; 
+              font-size: 11px; 
+              font-weight: 600; 
+            }
+            .badge-payment { 
+              background: #dcfce7; 
+              color: #15803d; 
+            }
+            .badge-refund { 
+              background: #fee2e2; 
+              color: #b91c1c; 
+            }
+            .footer {
+              margin-top: 50px;
+              border-top: 1px solid #e2e8f0;
+              padding-top: 15px;
+              font-size: 12px;
+              color: #94a3b8;
+              text-align: center;
+            }
+            @media print {
+              body { padding: 0; }
+              .summary-card { box-shadow: none; }
+            }
+          </style>
+        </head>
+        <body>
+          <table class="header-table">
+            <tr>
+              <td class="header-title-cell">
+                <h1>Financial Summary Report</h1>
+                <p>Generated for <strong>${hotelName}</strong></p>
+              </td>
+              <td class="header-info-cell">
+                <div><strong>Hotel Code:</strong> ${hotelCode}</div>
+                <div><strong>Report Period:</strong> ${txnFilter.toUpperCase()} ${txnFilter === 'custom' ? `(${txnStartDate || 'Start'} to ${txnEndDate || 'End'})` : ''}</div>
+                <div><strong>Generated At:</strong> ${new Date().toLocaleString('en-IN')}</div>
+              </td>
+            </tr>
+          </table>
+          
+          <div class="divider"></div>
+          
+          <div class="summary-title">Financial Summary Overview</div>
+          <div class="summary-grid">
+            <div class="summary-card">
+              <div class="label">Booking Count</div>
+              <div class="value">${txnSummary.bookingCount}</div>
+            </div>
+            <div class="summary-card" style="border-left: 3px solid #ef4444;">
+              <div class="label">Refund Count</div>
+              <div class="value">${txnSummary.refundCount}</div>
+            </div>
+            <div class="summary-card" style="border-left: 3px solid #10b981;">
+              <div class="label">Total Booking Amount</div>
+              <div class="value">₹${txnSummary.totalBookingAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+            </div>
+            <div class="summary-card" style="border-left: 3px solid #f59e0b;">
+              <div class="label">Total Refund Amount</div>
+              <div class="value">₹${txnSummary.totalRefundAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+            </div>
+          </div>
+          
+          <div class="table-title">Transaction Log Details</div>
+          <table>
+            <thead>
+              <tr>
+                <th>Date & Time</th>
+                <th>Guest</th>
+                <th>Room</th>
+                <th>Type</th>
+                <th>Method</th>
+                <th>Receipt ID</th>
+                <th style="text-align: right;">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHtml}
+            </tbody>
+          </table>
+
+          <div class="footer">
+            End of Financial Summary Report. Thank you for using our Hotel Operations Management system.
+          </div>
+          
+          <script>
+            window.onload = function() {
+              window.print();
+              window.onafterprint = function() {
+                window.close();
+              };
+            };
+          </script>
+        </body>
+      </html>
+    `;
+    printWindow.document.write(html);
+    printWindow.document.close();
+  };
+
   const handleSaveNotes = () => {
     if (!selectedBooking) return;
     fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/${selectedBooking.id}/`, {
@@ -507,82 +891,48 @@ function App() {
       .catch(err => triggerToast(err.message));
   };
 
-  const handlePayTotalBill = async () => {
+  const handleAddExtraCharges = () => {
     if (!selectedBooking) return;
-    const amountToPay = parseFloat(amountToPayInput) || 0;
     const extraAmount = parseFloat(extraAmountInput) || 0;
-    const totalToPay = amountToPay + extraAmount;
-
-    if (totalToPay <= 0) {
-      triggerToast('Please enter an amount to pay.');
+    if (extraAmount <= 0) {
+      triggerToast('Please enter a valid extra charges amount.');
       return;
     }
 
-    try {
-      let finalBooking = selectedBooking;
-      if (extraAmount > 0) {
-        const currentExtra = parseFloat(selectedBooking.extra_charges) || 0;
-        const newExtra = currentExtra + extraAmount;
+    const currentExtra = parseFloat(selectedBooking.extra_charges) || 0;
+    const newExtra = currentExtra + extraAmount;
 
-        const putRes = await fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/${selectedBooking.id}/`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Token ${token}`
-          },
-          body: JSON.stringify({ extra_charges: newExtra })
-        });
-        if (!putRes.ok) {
-          const putData = await putRes.json();
-          throw new Error(putData.detail || 'Failed to update extra charges');
-        }
-        finalBooking = await putRes.json();
-      }
+    const currentReason = selectedBooking.extra_charges_reason || '';
+    const newReason = currentReason 
+      ? `${currentReason}, ${extraAmountReasonInput || 'Incidentals'}`
+      : (extraAmountReasonInput || 'Incidentals');
 
-      const postRes = await fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/${finalBooking.id}/transactions/`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Token ${token}`
-        },
-        body: JSON.stringify({
-          amount: totalToPay,
-          payment_method: paymentMethod,
-          receipt_id: paymentReceiptId
-        })
-      });
-      if (!postRes.ok) {
-        const postData = await postRes.json();
-        throw new Error(postData.detail || 'Failed to log transaction');
-      }
-      finalBooking = await postRes.json();
-
-      const receipt = {
-        type: 'total_bill',
-        guestName: `${finalBooking.guest_first_name} ${finalBooking.guest_last_name}`,
-        roomNumber: finalBooking.room_number,
-        stayCost: parseFloat(finalBooking.total_cost) - parseFloat(finalBooking.extra_charges || 0),
-        extraCharges: parseFloat(finalBooking.extra_charges || 0),
-        totalCost: parseFloat(finalBooking.total_cost),
-        amountPaid: totalToPay,
-        paymentMethod: paymentMethod,
-        receiptId: paymentReceiptId,
-        outstanding: parseFloat(finalBooking.outstanding_amount),
-        timestamp: new Date().toLocaleString()
-      };
-
-      triggerToast(`Successfully processed payment of ₹${totalToPay.toLocaleString('en-IN')}!`);
-      setExtraAmountInput('0');
-      setPaymentReceiptId('');
-      setSelectedBooking(finalBooking);
-      setAmountToPayInput(finalBooking.outstanding_amount.toString());
-      setBookings(prev => prev.map(b => b.id === finalBooking.id ? finalBooking : b));
-      setReceiptData(receipt);
-      setReceiptModalOpen(true);
-      refreshBookings(finalBooking.id);
-    } catch (err) {
-      triggerToast(err.message);
-    }
+    fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/${selectedBooking.id}/`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Token ${token}`
+      },
+      body: JSON.stringify({ 
+        extra_charges: newExtra,
+        extra_charges_reason: newReason
+      })
+    })
+      .then(async res => {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed to add extra charges');
+        return data;
+      })
+      .then(data => {
+        triggerToast(`Added extra charge of ₹${extraAmount.toLocaleString('en-IN')} successfully!`);
+        setExtraAmountInput('0');
+        setExtraAmountReasonInput('');
+        setSelectedBooking(data);
+        setAmountToPayInput(data.outstanding_amount.toString());
+        setBookings(prev => prev.map(b => b.id === data.id ? data : b));
+        refreshBookings(data.id);
+      })
+      .catch(err => triggerToast(err.message));
   };
 
   const handleCheckIn = (bookingId) => {
@@ -728,16 +1078,23 @@ function App() {
     const targetBooking = contextMenu.booking || selectedBooking;
     if (!targetBooking) return;
     
+    let reasonText = '';
+    if (userRole !== 'customer') {
+      reasonText = rejectionReason === 'Other' ? customRejectionReason : rejectionReason;
+    }
+    
     const receipt = {
       type: 'cancellation',
       guestName: `${targetBooking.guest_first_name} ${targetBooking.guest_last_name}`,
       roomNumber: targetBooking.room_number,
       refundAmount: parseFloat(cancelRefundAmount) || 0,
       paymentMethod: cancelPaymentMethod,
-      timestamp: new Date().toLocaleString()
+      timestamp: new Date().toLocaleString(),
+      reason: reasonText
     };
     
-    fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/${targetBooking.id}/`, {
+    const url = `http://127.0.0.1:8000/api/my-hotel/bookings/${targetBooking.id}/?reason=${encodeURIComponent(reasonText)}&refund=${parseFloat(cancelRefundAmount) || 0}&method=${cancelPaymentMethod}`;
+    fetch(url, {
       method: 'DELETE',
       headers: { 'Authorization': `Token ${token}` }
     })
@@ -795,6 +1152,7 @@ function App() {
         roomNumber: finalBooking.room_number,
         stayCost: parseFloat(finalBooking.total_cost) - parseFloat(finalBooking.extra_charges || 0),
         extraCharges: parseFloat(finalBooking.extra_charges || 0),
+        extraChargesReason: finalBooking.extra_charges_reason,
         totalCost: parseFloat(finalBooking.total_cost),
         amountPaid: outstanding > 0 ? outstanding : 0,
         paymentMethod: checkoutPaymentMethod,
@@ -984,7 +1342,7 @@ function App() {
 
     // Build FormData instead of JSON to support file uploads
     const formData = new FormData();
-    formData.append('room_id', selectedRoom.id);
+    formData.append('room_id', isEditMode ? (newBooking.room_id || selectedRoom?.id) : selectedRoom?.id);
     formData.append('guest_first_name', newBooking.guest_first_name);
     formData.append('guest_last_name', newBooking.guest_last_name);
     formData.append('guest_phone', newBooking.guest_phone);
@@ -1033,6 +1391,7 @@ function App() {
             type: 'payment',
             guestName: `${data.guest_first_name} ${data.guest_last_name}`,
             roomNumber: data.room_number,
+            roomType: data.room_type,
             amount: advancePaidNum,
             paymentMethod: newBooking.payment_method,
             receiptId: newBooking.receipt_id,
@@ -1164,7 +1523,8 @@ function App() {
           const receipt = {
             type: 'payment',
             guestName: `${data.guest_first_name} ${data.guest_last_name}`,
-            roomNumber: data.room_number,
+            roomNumber: 'Assigned on Check-In',
+            roomType: data.room_type,
             amount: advancePaidNum,
             paymentMethod: newBooking.payment_method,
             receiptId: newBooking.receipt_id,
@@ -1184,7 +1544,7 @@ function App() {
           check_out: '',
           check_out_time: '11:30 AM',
           status: 'Booked',
-          advance_paid: '',
+          advance_paid: 500,
           advance_status: 'Unpaid',
           payment_method: 'Cash',
           receipt_id: '',
@@ -1208,6 +1568,85 @@ function App() {
         triggerToast(err.message || 'Error occurred while saving reservation.');
         setLoading(false);
       });
+  };
+
+  const handleCustomerCancelBooking = (bookingId) => {
+    if (window.confirm("Are you sure you want to cancel this reservation?")) {
+      fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/${bookingId}/`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Token ${token}`
+        }
+      })
+        .then(res => {
+          if (!res.ok) throw new Error("Failed to cancel reservation.");
+          triggerToast("Reservation cancelled successfully!");
+          // Refresh bookings
+          fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/?hotel_code=${hotelCode}`, {
+            headers: { 'Authorization': `Token ${token}` }
+          })
+            .then(r => r.json())
+            .then(data => setBookings(data));
+        })
+        .catch(err => triggerToast(err.message));
+    }
+  };
+
+  const handleCustomerOpenPaymentModal = (booking) => {
+    setCustomerPaymentBooking(booking);
+    setCustomerPaymentAmount(parseFloat(booking.outstanding_amount).toString());
+    setCustomerPaymentMethod('UPI');
+    setCustomerPaymentReceiptId('');
+    setCustomerPaymentModalOpen(true);
+  };
+
+  const handleCustomerPaymentSubmit = (e) => {
+    e.preventDefault();
+    if (!customerPaymentBooking || !customerPaymentAmount) return;
+    
+    fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/${customerPaymentBooking.id}/transactions/`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Token ${token}`
+      },
+      body: JSON.stringify({
+        amount: parseFloat(customerPaymentAmount),
+        payment_method: customerPaymentMethod,
+        receipt_id: customerPaymentReceiptId || null
+      })
+    })
+      .then(async res => {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed to submit payment');
+        return data;
+      })
+      .then(data => {
+        triggerToast("Payment submitted successfully!");
+        setCustomerPaymentModalOpen(false);
+        
+        // Show receipt
+        const receipt = {
+          type: 'payment',
+          guestName: `${data.guest_first_name} ${data.guest_last_name}`,
+          roomNumber: data.status === 'Booked' ? 'Assigned on Check-In' : data.room_number,
+          roomType: data.room_type,
+          amount: parseFloat(customerPaymentAmount),
+          paymentMethod: customerPaymentMethod,
+          receiptId: customerPaymentReceiptId,
+          timestamp: new Date().toLocaleString()
+        };
+        setReceiptData(receipt);
+        setReceiptModalOpen(true);
+
+        // Refresh bookings list
+        fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/?hotel_code=${hotelCode}`, {
+          headers: { 'Authorization': `Token ${token}` }
+        })
+          .then(res => res.json())
+          .then(bookingsData => setBookings(bookingsData));
+      })
+      .catch(err => triggerToast(err.message));
   };
 
   const handleDeleteBooking = () => {
@@ -1515,6 +1954,7 @@ function App() {
   };
 
   const overdueBookings = bookings.filter(isCheckoutPassed);
+  const bookingRequests = bookings.filter(b => b.status === 'Booked' && b.kyc && b.kyc.kyc_type && !b.kyc.kyc_verified);
 
   return (
     <>
@@ -1541,6 +1981,60 @@ function App() {
             </div>
           </div>
 
+          {userRole !== 'customer' && (
+            <div className="manager-dashboard-nav" style={{
+              display: 'flex',
+              gap: '12px',
+              marginBottom: '1rem',
+              background: 'rgba(30, 41, 59, 0.4)',
+              padding: '6px 12px',
+              borderRadius: '12px',
+              border: '1px solid rgba(255, 255, 255, 0.05)',
+              alignItems: 'center'
+            }}>
+              <button
+                onClick={() => setManagerTab('calendar')}
+                style={{
+                  background: managerTab === 'calendar' ? 'linear-gradient(135deg, #8b5cf6, #6d28d9)' : 'transparent',
+                  border: 'none',
+                  color: '#fff',
+                  padding: '8px 16px',
+                  borderRadius: '8px',
+                  fontSize: '0.85rem',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  transition: 'all 0.25s ease',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  boxShadow: managerTab === 'calendar' ? '0 4px 12px rgba(139, 92, 246, 0.25)' : 'none'
+                }}
+              >
+                📅 Front Desk Calendar
+              </button>
+              <button
+                onClick={() => setManagerTab('transactions')}
+                style={{
+                  background: managerTab === 'transactions' ? 'linear-gradient(135deg, #8b5cf6, #6d28d9)' : 'transparent',
+                  border: 'none',
+                  color: '#fff',
+                  padding: '8px 16px',
+                  borderRadius: '8px',
+                  fontSize: '0.85rem',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  transition: 'all 0.25s ease',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  boxShadow: managerTab === 'transactions' ? '0 4px 12px rgba(139, 92, 246, 0.25)' : 'none'
+                }}
+              >
+                📊 Total Transactions & Reports
+              </button>
+            </div>
+          )}
+
           {userRole === 'customer' ? (
             <div className="customer-dashboard-grid" style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.8fr', gap: '1.5rem', marginTop: '0.5rem' }}>
               {/* Left Card: Booking Form */}
@@ -1554,16 +2048,18 @@ function App() {
                       value={newBooking.room_type || 'Standard'}
                       onChange={e => {
                         const type = e.target.value;
+                        const minAdv = ROOM_TYPE_METADATA[type]?.minAdvance || 500;
                         setNewBooking(prev => ({
                           ...prev,
-                          room_type: type
+                          room_type: type,
+                          advance_paid: minAdv
                         }));
                       }}
                       style={{ background: 'rgba(15, 23, 42, 0.85)', color: '#fff' }}
                     >
-                      <option value="Standard">Standard Room (₹1,500/night)</option>
-                      <option value="Deluxe">Deluxe Room (₹2,500/night)</option>
-                      <option value="Superior">Superior Room (₹4,000/night)</option>
+                      <option value="Standard">Standard Room (Single Bed) (₹1,500/night)</option>
+                      <option value="Deluxe">Deluxe Room (Double Bed) (₹2,500/night)</option>
+                      <option value="Superior">Superior Room (Duplex) (₹4,000/night)</option>
                     </select>
                   </div>
 
@@ -1784,6 +2280,7 @@ function App() {
                         <th>Billing Info</th>
                         <th>Status</th>
                         <th>KYC</th>
+                        <th>Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1794,11 +2291,22 @@ function App() {
                               {b.check_in} to {b.check_out}
                             </td>
                             <td>
-                              <strong>Room {b.room_number}</strong>
+                              {b.checked_out || b.status === 'Checked_in' ? (
+                                <strong>Room {b.room_number}</strong>
+                              ) : (
+                                <span style={{ fontStyle: 'italic', color: '#94a3b8' }}>Assigned on Check-In</span>
+                              )}
                             </td>
-                            <td>{b.room_type}</td>
+                            <td>
+                              {b.room_type === 'Standard' ? 'Standard (Single Bed)' : b.room_type === 'Deluxe' ? 'Deluxe (Double Bed)' : b.room_type === 'Superior' ? 'Superior (Duplex)' : b.room_type}
+                            </td>
                             <td>
                               <div>Total: ₹{parseFloat(b.total_cost).toLocaleString('en-IN')}</div>
+                              {parseFloat(b.extra_charges || 0) > 0 && (
+                                <div style={{ fontSize: '0.75rem', color: '#a78bfa' }}>
+                                  Extra: ₹{parseFloat(b.extra_charges).toLocaleString('en-IN')} ({b.extra_charges_reason || 'Incidentals'})
+                                </div>
+                              )}
                               <div style={{ fontSize: '0.75rem', color: parseFloat(b.outstanding_amount) > 0 ? '#fb7185' : '#4ade80' }}>
                                 Outstanding: ₹{parseFloat(b.outstanding_amount).toLocaleString('en-IN')}
                               </div>
@@ -1809,15 +2317,46 @@ function App() {
                                 borderRadius: '4px',
                                 fontSize: '0.7rem',
                                 fontWeight: 'bold',
-                                background: b.checked_out
+                                background: b.status === 'Cancelled'
+                                  ? 'rgba(100, 116, 139, 0.2)'
+                                  : b.status === 'Rejected'
+                                  ? 'rgba(239, 68, 68, 0.2)'
+                                  : b.checked_out
                                   ? 'rgba(239, 68, 68, 0.2)'
                                   : b.status === 'Checked_in'
                                   ? 'rgba(34, 197, 94, 0.2)'
-                                  : 'rgba(59, 130, 246, 0.2)',
-                                color: b.checked_out ? '#ef4444' : b.status === 'Checked_in' ? '#4ade80' : '#60a5fa'
+                                  : b.kyc?.kyc_verified
+                                  ? 'rgba(34, 197, 94, 0.2)'
+                                  : 'rgba(245, 158, 11, 0.2)',
+                                color: b.status === 'Cancelled'
+                                  ? '#cbd5e1'
+                                  : b.status === 'Rejected'
+                                  ? '#ef4444'
+                                  : b.checked_out
+                                  ? '#ef4444'
+                                  : b.status === 'Checked_in'
+                                  ? '#4ade80'
+                                  : b.kyc?.kyc_verified
+                                  ? '#4ade80'
+                                  : '#fbbf24'
                               }}>
-                                {b.checked_out ? 'Checked-Out' : b.status === 'Checked_in' ? 'Checked-In' : 'Booked'}
+                                {b.status === 'Cancelled'
+                                  ? 'Cancelled'
+                                  : b.status === 'Rejected'
+                                  ? 'Rejected'
+                                  : b.checked_out
+                                  ? 'Checked-Out'
+                                  : b.status === 'Checked_in'
+                                  ? 'Checked-In'
+                                  : b.kyc?.kyc_verified
+                                  ? 'Approved'
+                                  : 'Pending Approval'}
                               </span>
+                              {(b.status === 'Cancelled' || b.status === 'Rejected') && b.rejection_reason && (
+                                <div style={{ fontSize: '0.7rem', color: '#94a3b8', marginTop: '4px' }}>
+                                  Reason: {b.rejection_reason}
+                                </div>
+                              )}
                             </td>
                             <td>
                               <span style={{
@@ -1825,17 +2364,53 @@ function App() {
                                 borderRadius: '4px',
                                 fontSize: '0.7rem',
                                 fontWeight: 'bold',
-                                background: b.kyc?.kyc_verified ? 'rgba(34, 197, 94, 0.2)' : 'rgba(245, 158, 11, 0.2)',
-                                color: b.kyc?.kyc_verified ? '#4ade80' : '#fbbf24'
+                                background: (b.status === 'Cancelled' || b.status === 'Rejected')
+                                  ? 'rgba(255, 255, 255, 0.05)'
+                                  : b.kyc?.kyc_verified
+                                  ? 'rgba(34, 197, 94, 0.2)'
+                                  : 'rgba(245, 158, 11, 0.2)',
+                                color: (b.status === 'Cancelled' || b.status === 'Rejected')
+                                  ? '#94a3b8'
+                                  : b.kyc?.kyc_verified
+                                  ? '#4ade80'
+                                  : '#fbbf24'
                               }}>
-                                {b.kyc?.kyc_verified ? 'Verified' : 'Pending'}
+                                {(b.status === 'Cancelled' || b.status === 'Rejected')
+                                  ? 'N/A'
+                                  : b.kyc?.kyc_verified
+                                  ? 'Verified'
+                                  : 'Pending'}
                               </span>
+                            </td>
+                            <td>
+                              <div style={{ display: 'flex', gap: '6px', flexDirection: 'column' }}>
+                                {parseFloat(b.outstanding_amount) > 0 && !b.checked_out && b.status !== 'Cancelled' && b.status !== 'Rejected' && (
+                                  <button
+                                    type="button"
+                                    className="btn-verify-request"
+                                    style={{ padding: '4px 8px', fontSize: '0.7rem', height: 'auto', background: 'linear-gradient(135deg, #10b981, #059669)', border: 'none', borderRadius: '4px', cursor: 'pointer', color: '#fff' }}
+                                    onClick={() => handleCustomerOpenPaymentModal(b)}
+                                  >
+                                    💳 Pay Bill
+                                  </button>
+                                )}
+                                {b.status === 'Booked' && !b.checked_out && (
+                                  <button
+                                    type="button"
+                                    className="btn-cancel"
+                                    style={{ padding: '4px 8px', fontSize: '0.7rem', height: 'auto', background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.3)', borderStyle: 'solid', borderWidth: '1px', borderRadius: '4px', cursor: 'pointer' }}
+                                    onClick={() => handleCustomerCancelBooking(b.id)}
+                                  >
+                                    ❌ Cancel
+                                  </button>
+                                )}
+                              </div>
                             </td>
                           </tr>
                         ))
                       ) : (
                         <tr>
-                          <td colSpan="6" style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '24px' }}>No stays booked yet. Book your first room above!</td>
+                          <td colSpan="7" style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '24px' }}>No stays booked yet. Book your first room above!</td>
                         </tr>
                       )}
                     </tbody>
@@ -1845,6 +2420,58 @@ function App() {
             </div>
           ) : (
             <>
+              {/* Guest Booking Requests Panel */}
+              {bookingRequests.length > 0 && (
+                <div className="booking-requests-container">
+                  <div className="alerts-header">
+                    <span className="alerts-icon">📩</span>
+                    <h3>Guest Booking Requests ({bookingRequests.length})</h3>
+                  </div>
+                  <div className="alerts-list">
+                    {bookingRequests.map(b => {
+                      const isPendingKYC = b.kyc && !b.kyc.kyc_verified;
+                      return (
+                        <div key={b.id} className="request-card">
+                          <div className="alert-info">
+                            <span style={{ fontSize: '1.0rem' }}>
+                              Guest: <strong>{b.guest_first_name} {b.guest_last_name}</strong> ({b.guest_phone})
+                            </span>
+                            <span style={{ fontSize: '0.85rem', color: '#cbd5e1' }}>
+                              Requested: <strong>{b.room_type}</strong> room | Stay: <strong>{b.check_in} to {b.check_out}</strong>
+                            </span>
+                            <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>
+                              Auto-assigned Block: <strong>Room {b.room_number}</strong> | KYC Status: {isPendingKYC ? (
+                                <span style={{ color: '#fbbf24', fontWeight: 'bold' }}>⚠️ Pending Verification</span>
+                              ) : (
+                                <span style={{ color: '#34d399', fontWeight: 'bold' }}>✅ Detail Verified</span>
+                              )}
+                            </span>
+                          </div>
+                          <div className="alert-actions">
+                            <button 
+                              className="btn-verify-request"
+                              onClick={() => {
+                                handleOpenInfoModal(b);
+                              }}
+                            >
+                              Verify & Allocate
+                            </button>
+                            {isPendingKYC && (
+                              <button 
+                                className="btn-approve-request"
+                                onClick={() => handleToggleKYCVerification(b.id, true)}
+                              >
+                                Approve Booking
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               {/* Stay Expiry Alerts */}
               {overdueBookings.length > 0 && (
                 <div className="overdue-alerts-container">
@@ -1884,7 +2511,8 @@ function App() {
               )}
 
               {/* Front Desk Scheduler Grid */}
-              <div className="calendar-card">
+              {managerTab === 'calendar' && (
+                <div className="calendar-card">
                 <div className="calendar-header-actions" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
                   <h2>Front Desk Booking Calendar Grid</h2>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
@@ -2036,6 +2664,179 @@ function App() {
                   </table>
                 </div>
               </div>
+              )}
+
+              {/* 📊 Financial Transactions & Reports */}
+              {managerTab === 'transactions' && (
+                <div className="calendar-card" style={{ marginTop: '1.5rem', padding: '1.5rem' }}>
+                <div className="calendar-header-actions" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: '1.5rem' }}>
+                  <h2 style={{ fontSize: '1.25rem', color: '#a78bfa', display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}>
+                    📊 Financial Transactions & Reports
+                  </h2>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <label style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Filter Period:</label>
+                      <select
+                        value={txnFilter}
+                        onChange={e => setTxnFilter(e.target.value)}
+                        className="input-control"
+                        style={{ width: '130px', padding: '4px 8px', fontSize: '0.8rem', background: '#0f172a', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', borderRadius: '6px' }}
+                      >
+                        <option value="today">Today</option>
+                        <option value="yesterday">Yesterday</option>
+                        <option value="custom">Date Range</option>
+                      </select>
+                    </div>
+
+                    {txnFilter === 'custom' && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <input
+                          type="date"
+                          value={txnStartDate}
+                          onChange={e => setTxnStartDate(e.target.value)}
+                          className="input-control"
+                          style={{ width: '130px', padding: '4px 8px', fontSize: '0.8rem', background: '#0f172a', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', borderRadius: '6px' }}
+                        />
+                        <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>to</span>
+                        <input
+                          type="date"
+                          value={txnEndDate}
+                          onChange={e => setTxnEndDate(e.target.value)}
+                          className="input-control"
+                          style={{ width: '130px', padding: '4px 8px', fontSize: '0.8rem', background: '#0f172a', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', borderRadius: '6px' }}
+                        />
+                      </div>
+                    )}
+
+                    {/* Export Buttons */}
+                    <button
+                      onClick={handleExportCSV}
+                      style={{
+                        background: 'rgba(16, 185, 129, 0.15)',
+                        border: '1px solid rgba(16, 185, 129, 0.3)',
+                        color: '#34d399',
+                        padding: '6px 12px',
+                        borderRadius: '6px',
+                        fontSize: '0.8rem',
+                        fontWeight: '600',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        transition: 'all 0.2s ease',
+                        height: '32px'
+                      }}
+                      title="Export transactions as CSV for Excel"
+                    >
+                      📥 Excel Export
+                    </button>
+                    <button
+                      onClick={handlePrintPDF}
+                      style={{
+                        background: 'rgba(59, 130, 246, 0.15)',
+                        border: '1px solid rgba(59, 130, 246, 0.3)',
+                        color: '#60a5fa',
+                        padding: '6px 12px',
+                        borderRadius: '6px',
+                        fontSize: '0.8rem',
+                        fontWeight: '600',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        transition: 'all 0.2s ease',
+                        height: '32px'
+                      }}
+                      title="Print or Save Summary Report as PDF"
+                    >
+                      🖨️ PDF Report
+                    </button>
+                  </div>
+                </div>
+
+                {/* Financial Summary Cards Panel */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1.25rem', marginBottom: '1.5rem' }}>
+                  <div style={{ background: 'rgba(59, 130, 246, 0.1)', border: '1px solid rgba(59, 130, 246, 0.2)', padding: '1.25rem', borderRadius: '12px' }}>
+                    <div style={{ fontSize: '0.8rem', color: '#93c5fd', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px' }}>Booking Count</div>
+                    <div style={{ fontSize: '1.75rem', fontWeight: 'bold', color: '#eff6ff' }}>{txnSummary.bookingCount}</div>
+                  </div>
+                  <div style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)', padding: '1.25rem', borderRadius: '12px' }}>
+                    <div style={{ fontSize: '0.8rem', color: '#fca5a5', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px' }}>Refund Count</div>
+                    <div style={{ fontSize: '1.75rem', fontWeight: 'bold', color: '#fef2f2' }}>{txnSummary.refundCount}</div>
+                  </div>
+                  <div style={{ background: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.2)', padding: '1.25rem', borderRadius: '12px' }}>
+                    <div style={{ fontSize: '0.8rem', color: '#6ee7b7', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px' }}>Total Booking Amount</div>
+                    <div style={{ fontSize: '1.75rem', fontWeight: 'bold', color: '#ecfdf5' }}>₹{txnSummary.totalBookingAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                  </div>
+                  <div style={{ background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.2)', padding: '1.25rem', borderRadius: '12px' }}>
+                    <div style={{ fontSize: '0.8rem', color: '#fcd34d', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px' }}>Total Refund Amount</div>
+                    <div style={{ fontSize: '1.75rem', fontWeight: 'bold', color: '#fffbeb' }}>₹{txnSummary.totalRefundAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                  </div>
+                </div>
+
+                {/* Transactions List Table */}
+                <div className="table-responsive" style={{ overflowX: 'auto', background: 'rgba(15, 23, 42, 0.4)', borderRadius: '12px', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.85rem' }}>
+                    <thead>
+                      <tr style={{ background: 'rgba(255, 255, 255, 0.03)', borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                        <th style={{ padding: '12px 16px', color: 'var(--text-secondary)', fontWeight: '600' }}>Date & Time</th>
+                        <th style={{ padding: '12px 16px', color: 'var(--text-secondary)', fontWeight: '600' }}>Guest</th>
+                        <th style={{ padding: '12px 16px', color: 'var(--text-secondary)', fontWeight: '600' }}>Room</th>
+                        <th style={{ padding: '12px 16px', color: 'var(--text-secondary)', fontWeight: '600' }}>Type</th>
+                        <th style={{ padding: '12px 16px', color: 'var(--text-secondary)', fontWeight: '600' }}>Method</th>
+                        <th style={{ padding: '12px 16px', color: 'var(--text-secondary)', fontWeight: '600' }}>Receipt ID</th>
+                        <th style={{ padding: '12px 16px', color: 'var(--text-secondary)', fontWeight: '600', textAlign: 'right' }}>Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredTransactions.length === 0 ? (
+                        <tr>
+                          <td colSpan={7} style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                            No transactions recorded for this period.
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredTransactions.map(t => {
+                          const amt = parseFloat(t.amount);
+                          const isRefund = amt < 0;
+                          return (
+                            <tr key={t.id} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.02)' }}>
+                              <td style={{ padding: '12px 16px', color: '#cbd5e1' }}>{t.created_at}</td>
+                              <td style={{ padding: '12px 16px', fontWeight: '500' }}>{t.guestName}</td>
+                              <td style={{ padding: '12px 16px', color: '#cbd5e1' }}>
+                                Room {t.roomNumber} ({t.roomType})
+                                {t.bookingExtraChargesReason && (
+                                  <div style={{ fontSize: '0.72rem', color: '#a78bfa', marginTop: '2px' }}>
+                                    Incid: {t.bookingExtraChargesReason}
+                                  </div>
+                                )}
+                              </td>
+                              <td style={{ padding: '12px 16px' }}>
+                                <span style={{
+                                  padding: '2px 8px',
+                                  borderRadius: '4px',
+                                  fontSize: '0.75rem',
+                                  fontWeight: '600',
+                                  background: isRefund ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+                                  color: isRefund ? '#f87171' : '#34d399'
+                                }}>
+                                  {isRefund ? 'Refund' : 'Booking Payment'}
+                                </span>
+                              </td>
+                              <td style={{ padding: '12px 16px', color: '#cbd5e1' }}>{t.payment_method}</td>
+                              <td style={{ padding: '12px 16px', color: '#94a3b8', fontFamily: 'monospace' }}>{t.receipt_id || '-'}</td>
+                              <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 'bold', color: isRefund ? '#f87171' : '#34d399' }}>
+                                {isRefund ? '-' : ''}₹{Math.abs(amt).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              )}
             </>
           )}
 
@@ -2071,7 +2872,32 @@ function App() {
                     </div>
                   )}
                   <div className="room-summary-box">
-                    <h4>Room: {selectedRoom?.number} ({selectedRoom?.room_type})</h4>
+                    {isEditMode ? (
+                      <div className="form-group" style={{ marginBottom: '12px' }}>
+                        <label className="form-label" style={{ fontWeight: 'bold', fontSize: '0.85rem', color: '#a78bfa' }}>Change Room Allocation</label>
+                        <select
+                          className="input-control"
+                          value={newBooking.room_id || selectedRoom?.id || ''}
+                          onChange={e => {
+                            const rId = e.target.value;
+                            const r = rooms.find(rm => Number(rm.id) === Number(rId));
+                            if (r) {
+                              setSelectedRoom(r);
+                              setNewBooking(prev => ({ ...prev, room_id: r.id }));
+                            }
+                          }}
+                          style={{ background: 'rgba(15, 23, 42, 0.85)', color: '#fff', fontSize: '0.85rem', padding: '6px 10px' }}
+                        >
+                          {rooms.map(rm => (
+                            <option key={rm.id} value={rm.id}>
+                              Room {rm.number} ({rm.room_type}) - {rm.cleanliness === 'dirty' ? '🧹 Dirty' : '🧼 Clean'}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : (
+                      <h4>Room: {selectedRoom?.number} ({selectedRoom?.room_type})</h4>
+                    )}
                     <div className="summary-grid">
                       <div className="summary-item">Nightly Rate: <span>₹{parseFloat(selectedRoom?.price).toLocaleString('en-IN')}</span></div>
                       <div className="summary-item">Min Advance Required: <span>₹{parseFloat(selectedRoom?.min_advance).toLocaleString('en-IN')}</span></div>
@@ -2441,6 +3267,97 @@ function App() {
                   <button className="btn-close" onClick={handleCloseInfoModal}>&times;</button>
                 </div>
 
+                {selectedBooking.kyc && (
+                  <div style={{
+                    padding: '16px 20px',
+                    borderRadius: '12px',
+                    margin: '16px 24px 0',
+                    background: selectedBooking.status === 'Rejected' 
+                      ? 'rgba(239, 68, 68, 0.1)' 
+                      : selectedBooking.status === 'Cancelled'
+                      ? 'rgba(100, 116, 139, 0.1)'
+                      : selectedBooking.kyc.kyc_verified 
+                      ? 'rgba(16, 185, 129, 0.1)' 
+                      : 'rgba(245, 158, 11, 0.1)',
+                    border: selectedBooking.status === 'Rejected'
+                      ? '1px solid rgba(239, 68, 68, 0.3)'
+                      : selectedBooking.status === 'Cancelled'
+                      ? '1px solid rgba(100, 116, 139, 0.3)'
+                      : selectedBooking.kyc.kyc_verified 
+                      ? '1px solid rgba(16, 185, 129, 0.3)' 
+                      : '1px solid rgba(245, 158, 11, 0.3)',
+                    boxSizing: 'border-box'
+                  }}>
+                    <div style={{ 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: '10px', 
+                      color: selectedBooking.status === 'Rejected'
+                        ? '#f87171'
+                        : selectedBooking.status === 'Cancelled'
+                        ? '#cbd5e1'
+                        : selectedBooking.kyc.kyc_verified 
+                        ? '#34d399' 
+                        : '#fbbf24' 
+                    }}>
+                      <span style={{ fontSize: '1.2rem' }}>
+                        {selectedBooking.status === 'Rejected' 
+                          ? '❌' 
+                          : selectedBooking.status === 'Cancelled'
+                          ? '🚫'
+                          : selectedBooking.kyc.kyc_verified 
+                          ? '✅' 
+                          : '⚠️'}
+                      </span>
+                      <div>
+                        <strong style={{ fontSize: '0.95rem' }}>
+                          {selectedBooking.status === 'Rejected' 
+                            ? 'Stay Request Rejected' 
+                            : selectedBooking.status === 'Cancelled'
+                            ? 'Stay Request Cancelled'
+                            : selectedBooking.kyc.kyc_verified 
+                            ? 'Details Verified & Room Allocation Approved' 
+                            : 'Pending Detail Verification & Room Allocation Approval'}
+                        </strong>
+                        <div style={{ fontSize: '0.8rem', color: '#cbd5e1', marginTop: '2px' }}>
+                          {selectedBooking.status === 'Rejected'
+                            ? `This stay request was rejected and cancelled by the manager. Reason: ${selectedBooking.rejection_reason || 'No reason specified'}`
+                            : selectedBooking.status === 'Cancelled'
+                            ? `This stay request was cancelled. ${selectedBooking.rejection_reason ? `Reason: ${selectedBooking.rejection_reason}` : ''}`
+                            : selectedBooking.kyc.kyc_verified 
+                            ? 'This customer stay has been verified and approved.' 
+                            : 'Please inspect the uploaded identity documents below and verify details to accept or reject the reservation.'}
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {selectedBooking.status === 'Booked' && !selectedBooking.kyc.kyc_verified && (
+                      <div style={{ display: 'flex', gap: '12px', marginTop: '12px', borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '12px' }}>
+                        <button
+                          type="button"
+                          className="btn-approve-request"
+                          style={{ padding: '6px 16px', fontSize: '0.8rem', height: '32px' }}
+                          onClick={() => handleToggleKYCVerification(selectedBooking.id, true)}
+                        >
+                          ✅ Verify & Approve Stay
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-checkout-alert"
+                          style={{ padding: '6px 16px', fontSize: '0.8rem', height: '32px' }}
+                          onClick={() => {
+                            setCancelRefundAmount(selectedBooking.advance_paid);
+                            setCancelPaymentMethod('Cash');
+                            setCancelModalOpen(true);
+                          }}
+                        >
+                          ❌ Reject & Cancel Stay
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="info-modal-grid">
                   {/* Left Column: Guest Info & Notes */}
                   {/* Left Column: Guest Info & Notes */}
@@ -2499,23 +3416,25 @@ function App() {
                                 }}>
                                   {selectedBooking.kyc.kyc_verified ? '✅ Verified' : '⚠️ Pending Verification'}
                                 </span>
-                                <button
-                                  type="button"
-                                  className="btn-submit-modal"
-                                  style={{
-                                    marginLeft: '10px',
-                                    padding: '2px 6px',
-                                    fontSize: '0.65rem',
-                                    height: 'auto',
-                                    width: 'auto',
-                                    background: selectedBooking.kyc.kyc_verified ? 'rgba(239, 68, 68, 0.1)' : 'rgba(34, 197, 94, 0.1)',
-                                    borderColor: selectedBooking.kyc.kyc_verified ? 'rgba(239, 68, 68, 0.3)' : 'rgba(34, 197, 94, 0.3)',
-                                    color: selectedBooking.kyc.kyc_verified ? '#ef4444' : '#34d399'
-                                  }}
-                                  onClick={() => handleToggleKYCVerification(selectedBooking.id, !selectedBooking.kyc.kyc_verified)}
-                                >
-                                  {selectedBooking.kyc.kyc_verified ? 'Mark Unverified' : 'Verify KYC'}
-                                </button>
+                                {!selectedBooking.kyc.kyc_verified && selectedBooking.status === 'Booked' && (
+                                  <button
+                                    type="button"
+                                    className="btn-submit-modal"
+                                    style={{
+                                      marginLeft: '10px',
+                                      padding: '2px 6px',
+                                      fontSize: '0.65rem',
+                                      height: 'auto',
+                                      width: 'auto',
+                                      background: 'rgba(34, 197, 94, 0.1)',
+                                      borderColor: 'rgba(34, 197, 94, 0.3)',
+                                      color: '#34d399'
+                                    }}
+                                    onClick={() => handleToggleKYCVerification(selectedBooking.id, true)}
+                                  >
+                                    Verify KYC
+                                  </button>
+                                )}
                               </div>
 
                               <span style={{ color: 'var(--text-secondary)' }}>Uploaded ID Files:</span>
@@ -2594,6 +3513,11 @@ function App() {
                           ₹{parseFloat(selectedBooking.extra_charges || 0).toLocaleString('en-IN')}
                         </strong>
                       </div>
+                      {parseFloat(selectedBooking.extra_charges || 0) > 0 && selectedBooking.extra_charges_reason && (
+                        <div style={{ fontSize: '0.72rem', color: '#a78bfa', textAlign: 'right', marginTop: '-2px', marginBottom: '2px', fontStyle: 'italic' }}>
+                          ({selectedBooking.extra_charges_reason})
+                        </div>
+                      )}
                       <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '4px', marginTop: '2px' }}>
                         <span>Total Stay Cost:</span>
                         <strong>₹{parseFloat(selectedBooking.total_cost).toLocaleString('en-IN')}</strong>
@@ -2646,69 +3570,37 @@ function App() {
 
                     {selectedBooking.status !== 'dirty' && (
                       <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.05)', paddingTop: '8px', marginTop: '4px' }}>
-                        <div style={{ fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '6px' }}>Receive Payment & Add Charges</div>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '8px' }}>
+                        <div style={{ fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '6px' }}>Include Incidental / Extra Charges</div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: '8px', marginBottom: '8px' }}>
                           <div>
-                            <label style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '2px' }}>Amount to Pay (Room Tariff)</label>
+                            <label style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '2px' }}>Extra Amount (₹)</label>
                             <input
                               type="number"
                               className="input-control-small"
-                              placeholder="Amount to Pay (₹)"
-                              value={amountToPayInput}
-                              onChange={e => setAmountToPayInput(e.target.value)}
-                            />
-                          </div>
-                          <div>
-                            <label style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '2px' }}>Extra / Incidentals Charge</label>
-                            <input
-                              type="number"
-                              className="input-control-small"
-                              placeholder="Extra Amount (₹)"
-                              value={extraAmountInput}
+                              placeholder="₹ Amount"
+                              value={extraAmountInput === '0' ? '' : extraAmountInput}
                               onChange={e => setExtraAmountInput(e.target.value)}
                             />
                           </div>
-                        </div>
-
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: '8px', marginBottom: '8px' }}>
                           <div>
-                            <label style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '2px' }}>Payment Method</label>
-                            <select
-                              className="input-control-small"
-                              value={paymentMethod}
-                              onChange={e => setPaymentMethod(e.target.value)}
-                            >
-                              <option value="Cash">Cash</option>
-                              <option value="UPI">UPI</option>
-                              <option value="Card">Card</option>
-                            </select>
-                          </div>
-                          <div>
-                            <label style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '2px' }}>Receipt/Txn ID (Optional)</label>
+                            <label style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '2px' }}>Reason for Extra Charge</label>
                             <input
                               type="text"
                               className="input-control-small"
-                              placeholder="XXX-XXX"
-                              value={paymentReceiptId}
-                              onChange={e => setPaymentReceiptId(e.target.value)}
+                              placeholder="e.g. Extra Bed, Food, Late Check-out"
+                              value={extraAmountReasonInput}
+                              onChange={e => setExtraAmountReasonInput(e.target.value)}
                             />
                           </div>
-                        </div>
-
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255, 255, 255, 0.03)', padding: '6px 10px', borderRadius: '4px', marginBottom: '8px', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
-                          <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Total to Collect:</span>
-                          <strong style={{ fontSize: '0.9rem', color: '#4ade80' }}>
-                            ₹{((parseFloat(amountToPayInput) || 0) + (parseFloat(extraAmountInput) || 0)).toLocaleString('en-IN')}
-                          </strong>
                         </div>
 
                         <button
                           type="button"
                           className="btn-submit-modal"
-                          style={{ height: '32px', fontSize: '0.8rem', width: '100%', background: 'rgba(52, 211, 153, 0.1)', borderColor: 'rgba(52, 211, 153, 0.3)', color: '#34d399', fontWeight: 'bold' }}
-                          onClick={handlePayTotalBill}
+                          style={{ height: '32px', fontSize: '0.8rem', width: '100%', background: 'rgba(139, 92, 246, 0.15)', borderColor: 'rgba(139, 92, 246, 0.3)', color: '#a78bfa', fontWeight: 'bold' }}
+                          onClick={handleAddExtraCharges}
                         >
-                          💳 Pay Total & Print Receipt
+                          ➕ Submit Incidental Charge
                         </button>
                       </div>
                     )}
@@ -2717,8 +3609,13 @@ function App() {
 
                 <div className="modal-actions" style={{ justifyContent: 'space-between', display: 'flex', width: '100%', borderTop: '1px solid rgba(255, 255, 255, 0.05)', paddingTop: '12px', marginTop: '12px' }}>
                   {(() => {
+                    const isEnded = selectedBooking.checked_out || selectedBooking.status === 'Cancelled' || selectedBooking.status === 'Rejected';
                     const currentRoomObj = rooms.find(r => Number(r.id) === Number(selectedBooking.room_id));
                     const roomIsDirty = currentRoomObj && currentRoomObj.cleanliness === 'dirty';
+                    
+                    if (isEnded) {
+                      return <div />;
+                    }
                     
                     return (
                       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
@@ -2763,11 +3660,49 @@ function App() {
                             <option value="dirty">🧹 Dirty (Needs Cleaning)</option>
                           </select>
                         </div>
+                        
+                        {!selectedBooking.checked_out && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: '6px', borderLeft: '1px solid rgba(255, 255, 255, 0.1)', paddingLeft: '12px' }}>
+                            <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Allot Room:</span>
+                            <select
+                              className="input-control-small"
+                              style={{ width: '155px', height: '30px' }}
+                              value={selectedBooking.room_id || ''}
+                              onChange={async e => {
+                                const rId = e.target.value;
+                                if (!rId) return;
+                                try {
+                                  const res = await fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/${selectedBooking.id}/`, {
+                                    method: 'PUT',
+                                    headers: {
+                                      'Content-Type': 'application/json',
+                                      'Authorization': `Token ${token}`
+                                    },
+                                    body: JSON.stringify({ room_id: rId })
+                                  });
+                                  const data = await res.json();
+                                  if (!res.ok) throw new Error(data.detail || 'Failed to reallocate room');
+                                  triggerToast(`Room reallocated to Room ${data.room_number}!`);
+                                  setSelectedBooking(data);
+                                  setBookings(prev => prev.map(b => b.id === data.id ? data : b));
+                                } catch (err) {
+                                  triggerToast(err.message);
+                                }
+                              }}
+                            >
+                              {rooms.map(rm => (
+                                <option key={rm.id} value={rm.id}>
+                                  Room {rm.number} ({rm.room_type})
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
                       </div>
                     );
                   })()}
                   <div style={{ display: 'flex', gap: '8px' }}>
-                    {!selectedBooking.checked_out && (
+                    {!(selectedBooking.checked_out || selectedBooking.status === 'Cancelled' || selectedBooking.status === 'Rejected') && (
                       <button type="button" className="btn-submit-modal" onClick={() => {
                         handleCloseInfoModal();
                         handleOpenEditModal(selectedBooking);
@@ -2831,7 +3766,71 @@ function App() {
             </div>
           )}
 
-          {/* Checkout Modal */}
+          {/* Customer Payment Modal */}
+          {customerPaymentModalOpen && customerPaymentBooking && (
+            <div className="modal-backdrop" style={{ zIndex: 10000 }} onClick={() => setCustomerPaymentModalOpen(false)}>
+              <div className="modal-content" style={{ maxWidth: '400px', background: '#020617', border: '1px solid #1e293b' }} onClick={e => e.stopPropagation()}>
+                <div className="modal-header">
+                  <h3>💳 Pay Stay's Outstanding Balance</h3>
+                  <button className="btn-close" onClick={() => setCustomerPaymentModalOpen(false)}>&times;</button>
+                </div>
+                <form onSubmit={handleCustomerPaymentSubmit}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '12px' }}>
+                    <div style={{ background: 'rgba(52, 211, 153, 0.05)', border: '1px solid rgba(52, 211, 153, 0.2)', padding: '10px 12px', borderRadius: '8px', fontSize: '0.85rem' }}>
+                      <div>Stay: <strong>{customerPaymentBooking.check_in} to {customerPaymentBooking.check_out}</strong></div>
+                      <div>Total Stay Cost: <strong>₹{parseFloat(customerPaymentBooking.total_cost).toLocaleString('en-IN')}</strong></div>
+                      <div style={{ color: '#4ade80', fontWeight: 'bold', marginTop: '4px' }}>Remaining Balance Due: ₹{parseFloat(customerPaymentBooking.outstanding_amount).toLocaleString('en-IN')}</div>
+                    </div>
+                    
+                    <div className="form-group">
+                      <label className="form-label">Payment Amount (₹)</label>
+                      <input
+                        type="number"
+                        className="input-control"
+                        required
+                        max={parseFloat(customerPaymentBooking.outstanding_amount)}
+                        min={0.01}
+                        step="0.01"
+                        placeholder="Enter amount to pay"
+                        value={customerPaymentAmount}
+                        onChange={e => setCustomerPaymentAmount(e.target.value)}
+                      />
+                    </div>
+                    
+                    <div className="form-group">
+                      <label className="form-label">Payment Method</label>
+                      <select
+                        className="input-control"
+                        value={customerPaymentMethod}
+                        onChange={e => setCustomerPaymentMethod(e.target.value)}
+                        style={{ background: 'rgba(15, 23, 42, 0.85)', color: '#fff' }}
+                      >
+                        <option value="UPI">UPI</option>
+                        <option value="Card">Card</option>
+                        <option value="Cash">Cash</option>
+                      </select>
+                    </div>
+                    
+                    <div className="form-group">
+                      <label className="form-label">Receipt ID / Transaction ID</label>
+                      <input
+                        type="text"
+                        className="input-control"
+                        placeholder="e.g. UPI Ref Number or Txn ID"
+                        value={customerPaymentReceiptId}
+                        onChange={e => setCustomerPaymentReceiptId(e.target.value)}
+                      />
+                    </div>
+                    
+                    <div className="modal-actions" style={{ marginTop: '12px' }}>
+                      <button type="button" className="btn-cancel" onClick={() => setCustomerPaymentModalOpen(false)}>Cancel</button>
+                      <button type="submit" className="btn-submit-modal" style={{ background: 'linear-gradient(135deg, #10b981, #059669)' }}>Submit Payment</button>
+                    </div>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
           {checkoutModalOpen && (contextMenu.booking || selectedBooking) && (
             <div className="modal-backdrop" style={{ zIndex: 10000 }} onClick={() => setCheckoutModalOpen(false)}>
               <div className="modal-content" style={{ maxWidth: '450px' }} onClick={e => e.stopPropagation()}>
@@ -2942,9 +3941,44 @@ function App() {
                     </select>
                   </div>
 
+                  {userRole !== 'customer' && (
+                    <>
+                      <div className="form-group" style={{ marginTop: '10px' }}>
+                        <label className="form-label">Rejection Reason</label>
+                        <select
+                          className="input-control"
+                          value={rejectionReason}
+                          onChange={e => setRejectionReason(e.target.value)}
+                          style={{ background: '#0f172a' }}
+                        >
+                          <option value="Rooms not available">Rooms not available</option>
+                          <option value="Documents incomplete / invalid">Documents incomplete / invalid</option>
+                          <option value="KYC verification failed">KYC verification failed</option>
+                          <option value="Other">Other (Specify below)</option>
+                        </select>
+                      </div>
+                      {rejectionReason === 'Other' && (
+                        <div className="form-group">
+                          <label className="form-label">Custom Rejection Reason</label>
+                          <input
+                            type="text"
+                            className="input-control"
+                            placeholder="Enter custom rejection reason"
+                            value={customRejectionReason}
+                            onChange={e => setCustomRejectionReason(e.target.value)}
+                          />
+                        </div>
+                      )}
+                    </>
+                  )}
+
                   <div className="modal-actions" style={{ marginTop: '12px' }}>
                     <button type="button" className="btn-cancel" onClick={() => setCancelModalOpen(false)}>Close</button>
-                    <button type="button" className="btn-submit-modal" style={{ background: '#ef4444', borderColor: '#dc2626' }} onClick={handleConfirmCancel}>
+                    <button
+                      type="button"
+                      className="btn-danger"
+                      onClick={handleConfirmCancel}
+                    >
                       Confirm Cancel & Refund
                     </button>
                   </div>
@@ -2952,8 +3986,6 @@ function App() {
               </div>
             </div>
           )}
-
-          {/* Refund Receipt Modal */}
           {receiptModalOpen && receiptData && (
             <div className="modal-backdrop" style={{ zIndex: 11000 }} onClick={() => setReceiptModalOpen(false)}>
               <div className="modal-content" style={{ maxWidth: '400px', background: '#020617', border: '1px solid #1e293b' }} onClick={e => e.stopPropagation()}>
@@ -2968,7 +4000,8 @@ function App() {
                   </div>
                   <div>Date/Time: {receiptData.timestamp}</div>
                   <div>Guest Name: {receiptData.guestName}</div>
-                  <div>Room: Room {receiptData.roomNumber}</div>
+                  <div>Room: {receiptData.roomNumber && receiptData.roomNumber.toString().startsWith('Assigned') ? receiptData.roomNumber : `Room ${receiptData.roomNumber}`}</div>
+                  {receiptData.roomType && <div>Room Type: {receiptData.roomType}</div>}
                   <div style={{ borderTop: '1px dashed rgba(255,255,255,0.1)', margin: '8px 0' }}></div>
                   
                   {receiptData.type === 'cancellation' ? (
@@ -2988,7 +4021,7 @@ function App() {
                         <span>₹{receiptData.stayCost.toLocaleString('en-IN')}</span>
                       </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span>Extra / Incidentals:</span>
+                        <span>Extra / Incidentals {receiptData.extraChargesReason ? `(${receiptData.extraChargesReason})` : ''}:</span>
                         <span>₹{receiptData.extraCharges.toLocaleString('en-IN')}</span>
                       </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', borderTop: '1px dashed rgba(255,255,255,0.1)', paddingTop: '4px' }}>
@@ -3025,6 +4058,53 @@ function App() {
                   <div className="modal-actions" style={{ marginTop: '16px', display: 'flex', justifyContent: 'center' }}>
                     <button type="button" className="btn-submit-modal" style={{ width: 'auto', padding: '6px 20px' }} onClick={() => setReceiptModalOpen(false)}>OK</button>
                   </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Extra Charges Customer Alert Popup */}
+          {extraChargesAlertBooking && (
+            <div className="modal-backdrop" style={{ zIndex: 12000 }} onClick={() => setExtraChargesAlertBooking(null)}>
+              <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '420px', border: '1px solid rgba(139, 92, 246, 0.3)', background: '#020617' }}>
+                <div className="modal-header">
+                  <h3 style={{ color: '#a78bfa', margin: 0, fontSize: '1.2rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    🛎️ Incidental Charges Added
+                  </h3>
+                  <button className="btn-close" onClick={() => setExtraChargesAlertBooking(null)}>&times;</button>
+                </div>
+                <div style={{ margin: '16px 0', fontSize: '0.85rem', color: '#cbd5e1', lineHeight: '1.5' }}>
+                  <p>Dear Guest, an additional charge has been added to your stay:</p>
+                  <div style={{ background: 'rgba(139, 92, 246, 0.05)', border: '1px solid rgba(139, 92, 246, 0.15)', padding: '12px', borderRadius: '8px', marginBottom: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>Extra Amount:</span>
+                      <strong style={{ color: '#a78bfa' }}>₹{parseFloat(extraChargesAlertBooking.extra_charges).toLocaleString('en-IN')}</strong>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>Reason:</span>
+                      <span style={{ fontWeight: '500', color: '#fff' }}>{extraChargesAlertBooking.extra_charges_reason || 'Incidentals'}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '6px', marginTop: '4px', fontWeight: 'bold' }}>
+                      <span>Total Outstanding:</span>
+                      <strong style={{ color: '#f87171' }}>₹{parseFloat(extraChargesAlertBooking.outstanding_amount).toLocaleString('en-IN')}</strong>
+                    </div>
+                  </div>
+                  <p>Please pay the outstanding balance to complete your bill settlement.</p>
+                </div>
+                <div className="modal-actions" style={{ justifyContent: 'center', borderTop: 'none', paddingTop: 0 }}>
+                  <button
+                    type="button"
+                    className="btn-submit-modal"
+                    style={{ width: '100%', background: 'linear-gradient(135deg, #8b5cf6, #6d28d9)' }}
+                    onClick={() => {
+                      setCustomerPaymentBooking(extraChargesAlertBooking);
+                      setCustomerPaymentAmount(extraChargesAlertBooking.outstanding_amount.toString());
+                      setCustomerPaymentModalOpen(true);
+                      setExtraChargesAlertBooking(null);
+                    }}
+                  >
+                    💳 Pay Total Outstanding Bill
+                  </button>
                 </div>
               </div>
             </div>

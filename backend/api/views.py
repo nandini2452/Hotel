@@ -275,8 +275,10 @@ def my_hotel_bookings(request):
                 "check_out_time": "11:30 AM",
                 "status": b.status,
                 "checked_out": b.checked_out,
+                "rejection_reason": b.rejection_reason,
                 "notes": b.notes,
                 "extra_charges": b.extra_charges,
+                "extra_charges_reason": b.extra_charges_reason,
                 "total_cost": total_cost,
                 "advance_paid": total_paid,
                 "advance_status": advance_status_val,
@@ -349,7 +351,7 @@ def my_hotel_bookings(request):
                     room=r,
                     check_in__lt=check_out_date,
                     check_out__gt=check_in_date
-                ).exclude(status='Checked_out')
+                ).exclude(status__in=['Checked_out', 'Cancelled', 'Rejected'])
                 if not overlaps.exists():
                     room = r
                     break
@@ -392,7 +394,7 @@ def my_hotel_bookings(request):
                 room=room,
                 check_in__lt=check_out_date,
                 check_out__gt=check_in_date
-            ).exclude(status='Checked_out')
+            ).exclude(status__in=['Checked_out', 'Cancelled', 'Rejected'])
             if overlapping_bookings.exists():
                 return Response({"detail": "This room is already booked for the selected dates."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -521,8 +523,10 @@ def my_hotel_bookings(request):
             "check_out_time": "11:30 AM",
             "status": booking.status,
             "checked_out": booking.checked_out,
+            "rejection_reason": booking.rejection_reason,
             "notes": booking.notes,
             "extra_charges": booking.extra_charges,
+            "extra_charges_reason": booking.extra_charges_reason,
             "total_cost": total_cost,
             "advance_paid": total_paid,
             "advance_status": actual_advance_status,
@@ -546,8 +550,14 @@ def my_hotel_booking_detail(request, pk):
     hotel = booking.room.hotel
     is_owner = hotel.owner == user
     is_manager = hotel.managers.filter(id=user.id).exists()
-    if not (is_owner or is_manager):
+    is_booking_customer = booking.customer and hasattr(user, 'customer_profile') and booking.customer == user.customer_profile
+
+    if not (is_owner or is_manager or is_booking_customer):
         return Response({"detail": "Not authorized for this hotel."}, status=status.HTTP_403_FORBIDDEN)
+
+    if request.method == 'PUT':
+        if not (is_owner or is_manager):
+            return Response({"detail": "Not authorized to modify booking details."}, status=status.HTTP_403_FORBIDDEN)
 
     if request.method == 'PUT':
         guest_first_name = request.data.get('guest_first_name')
@@ -560,6 +570,7 @@ def my_hotel_booking_detail(request, pk):
         checked_out_val = request.data.get('checked_out')
         notes = request.data.get('notes')
         extra_charges = request.data.get('extra_charges')
+        extra_charges_reason = request.data.get('extra_charges_reason')
 
         # KYC details
         kyc_type = request.data.get('kyc_type')
@@ -586,6 +597,8 @@ def my_hotel_booking_detail(request, pk):
                 booking.extra_charges = Decimal(str(extra_charges))
             except (ValueError, TypeError):
                 return Response({"detail": "Extra charges must be a number."}, status=status.HTTP_400_BAD_REQUEST)
+        if extra_charges_reason is not None:
+            booking.extra_charges_reason = extra_charges_reason
 
         # Get or create customer if it doesn't exist on this booking
         if booking.guest_phone:
@@ -626,7 +639,10 @@ def my_hotel_booking_detail(request, pk):
                 if kyc_back:
                     customer.kyc_back = kyc_back
                 if kyc_verified_val is not None:
-                    customer.kyc_verified = (str(kyc_verified_val).lower() == 'true')
+                    new_val = (str(kyc_verified_val).lower() == 'true')
+                    if customer.kyc_verified and not new_val:
+                        return Response({"detail": "Once verified, verification status cannot be revoked/unverified."}, status=status.HTTP_400_BAD_REQUEST)
+                    customer.kyc_verified = new_val
                 
                 customer.user.first_name = booking.guest_first_name
                 customer.user.last_name = booking.guest_last_name
@@ -634,6 +650,17 @@ def my_hotel_booking_detail(request, pk):
                     customer.user.email = booking.guest_email
                 customer.user.save()
                 customer.save()
+
+        # Handle room reallocation
+        room_id = request.data.get('room_id')
+        if room_id:
+            try:
+                new_room = Room.objects.get(id=room_id)
+                if new_room.hotel != hotel:
+                    return Response({"detail": "Room does not belong to this hotel."}, status=status.HTTP_400_BAD_REQUEST)
+                booking.room = new_room
+            except Room.DoesNotExist:
+                return Response({"detail": "Room not found."}, status=status.HTTP_404_NOT_FOUND)
 
         # Handle check-in and check-out dates
         cin_date_str = check_in or booking.check_in.strftime('%Y-%m-%d')
@@ -652,7 +679,7 @@ def my_hotel_booking_detail(request, pk):
             room=booking.room,
             check_in__lt=check_out_date,
             check_out__gt=check_in_date
-        ).exclude(id=booking.id).exclude(status='Checked_out')
+        ).exclude(id=booking.id).exclude(status__in=['Checked_out', 'Cancelled', 'Rejected'])
 
         if overlapping_bookings.exists():
             return Response({"detail": "This room is already booked for the selected dates."}, status=status.HTTP_400_BAD_REQUEST)
@@ -727,8 +754,10 @@ def my_hotel_booking_detail(request, pk):
             "check_out_time": "11:30 AM",
             "status": booking.status,
             "checked_out": booking.checked_out,
+            "rejection_reason": booking.rejection_reason,
             "notes": booking.notes,
             "extra_charges": booking.extra_charges,
+            "extra_charges_reason": booking.extra_charges_reason,
             "total_cost": total_cost,
             "advance_paid": total_paid,
             "advance_status": actual_advance_status,
@@ -738,8 +767,38 @@ def my_hotel_booking_detail(request, pk):
         }, status=status.HTTP_200_OK)
 
     elif request.method == 'DELETE':
-        booking.delete()
-        return Response({"detail": "Booking deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
+        reason = request.query_params.get('reason') or request.data.get('reason') or ''
+        if is_booking_customer:
+            if booking.status != 'Booked':
+                return Response({"detail": "Cannot cancel a reservation that has already checked in or checked out."}, status=status.HTTP_400_BAD_REQUEST)
+            booking.status = 'Cancelled'
+            if reason:
+                booking.rejection_reason = reason
+            booking.save()
+            return Response({"detail": "Booking cancelled successfully."}, status=status.HTTP_200_OK)
+        else:
+            booking.status = 'Rejected'
+            booking.rejection_reason = reason if reason else 'No reason specified'
+            
+            refund_val = request.query_params.get('refund') or request.data.get('refund')
+            if refund_val:
+                try:
+                    from decimal import Decimal
+                    refund_amount = Decimal(str(refund_val))
+                    if refund_amount > 0:
+                        method = request.query_params.get('method') or request.data.get('method') or 'Cash'
+                        from .models import Transaction
+                        Transaction.objects.create(
+                            booking=booking,
+                            amount=-refund_amount,
+                            payment_method=method,
+                            receipt_id=f"REF-{booking.id}"
+                        )
+                except Exception:
+                    pass
+            
+            booking.save()
+            return Response({"detail": "Booking rejected successfully."}, status=status.HTTP_200_OK)
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
@@ -756,7 +815,8 @@ def create_transaction(request, pk):
     hotel = booking.room.hotel
     is_owner = hotel.owner == user
     is_manager = hotel.managers.filter(id=user.id).exists()
-    if not (is_owner or is_manager):
+    is_booking_customer = booking.customer and hasattr(user, 'customer_profile') and booking.customer == user.customer_profile
+    if not (is_owner or is_manager or is_booking_customer):
         return Response({"detail": "Not authorized for this hotel."}, status=status.HTTP_403_FORBIDDEN)
 
     amount = request.data.get('amount')
@@ -822,8 +882,10 @@ def create_transaction(request, pk):
         "check_out_time": "11:30 AM",
         "status": booking.status,
         "checked_out": booking.checked_out,
+        "rejection_reason": booking.rejection_reason,
         "notes": booking.notes,
         "extra_charges": booking.extra_charges,
+        "extra_charges_reason": booking.extra_charges_reason,
         "total_cost": total_cost,
         "advance_paid": total_paid,
         "advance_status": actual_advance_status,

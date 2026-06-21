@@ -55,6 +55,8 @@ class Booking(models.Model):
         ('Booked', 'Booked'),
         ('Checked_in', 'Checked_in'),
         ('Checked_out', 'Checked_out'),
+        ('Cancelled', 'Cancelled'),
+        ('Rejected', 'Rejected'),
     ]
     room = models.ForeignKey(Room, on_delete=models.CASCADE, related_name='bookings')
     customer = models.ForeignKey(Customer, on_delete=models.SET_NULL, related_name='bookings', null=True, blank=True)
@@ -67,7 +69,9 @@ class Booking(models.Model):
     status = models.CharField(max_length=50, choices=STATUS_CHOICES, default='Booked')
     notes = models.TextField(blank=True, default='')
     extra_charges = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    extra_charges_reason = models.CharField(max_length=255, blank=True, default='')
     checked_out = models.BooleanField(default=False)
+    rejection_reason = models.TextField(blank=True, default='')
 
     def __str__(self):
         return f"{self.guest_first_name} {self.guest_last_name} - Room {self.room.number} ({self.check_in} to {self.check_out}) - Status: {self.status}"

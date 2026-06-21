@@ -1164,3 +1164,71 @@ select.input-control-small {
   }
 }
 
+/* Guest Booking Requests container */
+.booking-requests-container {
+  background: rgba(167, 139, 250, 0.05);
+  border: 1px solid rgba(167, 139, 250, 0.2);
+  border-radius: 16px;
+  padding: 1.25rem;
+  margin-bottom: 1.5rem;
+  animation: slideInDown 0.3s ease-out;
+}
+
+.booking-requests-container h3 {
+  font-family: var(--font-title);
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #c084fc;
+  margin: 0;
+}
+
+.request-card {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  padding: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  transition: border-color 0.2s ease;
+}
+
+.request-card:hover {
+  border-color: rgba(167, 139, 250, 0.3);
+}
+
+.btn-verify-request {
+  background: linear-gradient(135deg, var(--primary), #4f46e5);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-verify-request:hover {
+  background: linear-gradient(135deg, var(--primary-hover), #4338ca);
+  transform: translateY(-1px);
+}
+
+.btn-approve-request {
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-approve-request:hover {
+  background: linear-gradient(135deg, #34d399, #059669);
+  transform: translateY(-1px);
+}
+
