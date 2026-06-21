@@ -132,6 +132,10 @@ function App() {
       }
     })
       .then(res => {
+        if (res.status === 401) {
+          handleLogout();
+          throw new Error('Session expired. Please log in again.');
+        }
         if (!res.ok) throw new Error('Failed to fetch rooms');
         return res.json();
       })
@@ -140,7 +144,7 @@ function App() {
       })
       .catch(err => {
         console.error(err);
-        triggerToast('Could not load hotel rooms.');
+        triggerToast(err.message || 'Could not load hotel rooms.');
       });
 
     // Fetch Bookings list
@@ -150,6 +154,10 @@ function App() {
       }
     })
       .then(res => {
+        if (res.status === 401) {
+          handleLogout();
+          throw new Error('Session expired. Please log in again.');
+        }
         if (!res.ok) throw new Error('Failed to fetch bookings');
         return res.json();
       })
@@ -158,7 +166,7 @@ function App() {
       })
       .catch(err => {
         console.error(err);
-        triggerToast('Could not load current bookings.');
+        triggerToast(err.message || 'Could not load current bookings.');
       });
   }, [token, hotelCode]);
 
