@@ -75,6 +75,56 @@ def login_view(request):
         "role": role
     }, status=status.HTTP_200_OK)
 
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def register_customer(request):
+    """
+    Register a new customer account.
+    """
+    email = request.data.get('email')
+    password = request.data.get('password')
+    first_name = request.data.get('first_name', '')
+    last_name = request.data.get('last_name', '')
+    phone = request.data.get('phone', '')
+
+    if not email or not password or not first_name or not last_name or not phone:
+        return Response({"detail": "All fields (email, password, first name, last name, phone) are required."}, status=status.HTTP_400_BAD_REQUEST)
+        
+    if User.objects.filter(username=email).exists():
+        return Response({"detail": "An account with this email address already exists."}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Validate phone format (10 digits)
+    if not (len(phone) == 10 and phone.isdigit()):
+        return Response({"detail": "Phone number must be exactly 10 digits."}, status=status.HTTP_400_BAD_REQUEST)
+        
+    from .models import Customer
+    if Customer.objects.filter(phone=phone).exists():
+        return Response({"detail": "A customer with this phone number already exists."}, status=status.HTTP_400_BAD_REQUEST)
+
+    # 1. Create Django user
+    user = User.objects.create_user(
+        username=email,
+        password=password,
+        email=email,
+        first_name=first_name,
+        last_name=last_name
+    )
+
+    # 2. Create customer profile
+    Customer.objects.create(
+        user=user,
+        phone=phone
+    )
+
+    # 3. Generate Token
+    token, _ = Token.objects.get_or_create(user=user)
+
+    return Response({
+        "token": token.key,
+        "username": user.username,
+        "role": "customer"
+    }, status=status.HTTP_201_CREATED)
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def my_hotel_details(request):

@@ -37,6 +37,14 @@ function App() {
   const [hotelName, setHotelName] = useState(localStorage.getItem('hotel_name') || '');
   const [userRole, setUserRole] = useState(localStorage.getItem('hotel_role') || '');
 
+  // Registration states
+  const [isRegisterMode, setIsRegisterMode] = useState(false);
+  const [regEmail, setRegEmail] = useState('');
+  const [regPassword, setRegPassword] = useState('');
+  const [regFirstName, setRegFirstName] = useState('');
+  const [regLastName, setRegLastName] = useState('');
+  const [regPhone, setRegPhone] = useState('');
+
   // Grid / Modal states
   const [rooms, setRooms] = useState([]);
   const [bookings, setBookings] = useState([]);
@@ -54,13 +62,13 @@ function App() {
     guest_last_name: '',
     guest_phone: '',
     guest_email: '',
-    check_in: getTodayStr(),
+    check_in: '',
     check_in_time: '11:30 AM',
-    check_out: getTomorrowStr(),
+    check_out: '',
     check_out_time: '11:30 AM',
     status: 'Booked',
-    advance_paid: 0,
-    advance_status: 'Paid',
+    advance_paid: '',
+    advance_status: 'Unpaid',
     payment_method: 'Cash',
     receipt_id: '',
     room_type: 'Standard',
@@ -131,10 +139,6 @@ function App() {
   // Pre-fill customer details if logged in as customer
   useEffect(() => {
     if (token && userRole === 'customer') {
-      const today = new Date();
-      const tomorrow = new Date();
-      tomorrow.setDate(today.getDate() + 1);
-      
       setNewBooking(prev => ({
         ...prev,
         guest_email: loggedInUser,
@@ -142,8 +146,8 @@ function App() {
         guest_last_name: prev.guest_last_name || '',
         guest_phone: prev.guest_phone || '',
         room_type: prev.room_type || 'Standard',
-        check_in: formatDate(today),
-        check_out: formatDate(tomorrow),
+        check_in: prev.check_in || '',
+        check_out: prev.check_out || '',
         advance_paid: prev.advance_paid || '',
         advance_status: 'Unpaid'
       }));
@@ -234,6 +238,64 @@ function App() {
     setTimeout(() => {
       setToasts(prev => prev.filter(t => t.id !== id));
     }, 3300);
+  };
+
+  const handleRegister = (e) => {
+    e.preventDefault();
+
+    if (!regEmail || !regPassword || !regFirstName || !regLastName || !regPhone) {
+      triggerToast('Please fill out all registration fields.');
+      return;
+    }
+
+    const phoneRegex = /^\d{10}$/;
+    if (!phoneRegex.test(regPhone)) {
+      triggerToast('Phone number must be exactly 10 digits.');
+      return;
+    }
+
+    setLoading(true);
+    fetch('http://127.0.0.1:8000/api/register/', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        email: regEmail,
+        password: regPassword,
+        first_name: regFirstName,
+        last_name: regLastName,
+        phone: regPhone
+      })
+    })
+      .then(async res => {
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.detail || 'Registration failed');
+        }
+        return data;
+      })
+      .then(data => {
+        triggerToast('Registration successful! Please sign in with your credentials.');
+        
+        // Switch back to login mode and pre-fill credentials
+        setIsRegisterMode(false);
+        setUsername(regEmail);
+        setPassword(regPassword);
+        
+        // Reset registration fields
+        setRegEmail('');
+        setRegPassword('');
+        setRegFirstName('');
+        setRegLastName('');
+        setRegPhone('');
+        setLoading(false);
+      })
+      .catch(err => {
+        console.error(err);
+        triggerToast(err.message || 'Error occurred during registration.');
+        setLoading(false);
+      });
   };
 
   const handleLogin = (e) => {
@@ -1126,9 +1188,9 @@ function App() {
           guest_last_name: '',
           guest_phone: '',
           guest_email: loggedInUser,
-          check_in: getTodayStr(),
+          check_in: '',
           check_in_time: '11:30 AM',
-          check_out: getTomorrowStr(),
+          check_out: '',
           check_out_time: '11:30 AM',
           status: 'Booked',
           advance_paid: '',
@@ -2978,56 +3040,161 @@ function App() {
           )}
         </div>
       ) : (
-        // Login Page
+        // Auth Page (Login or Register)
         <div className="auth-wrapper">
-          <form onSubmit={handleLogin}>
-            <div className="form-group">
-              <label className="form-label">Username</label>
-              <input
-                type="text"
-                className="input-control"
-                placeholder="Enter username"
-                value={username}
-                onChange={e => setUsername(e.target.value)}
-                disabled={loading}
-                required
-              />
-            </div>
+          {isRegisterMode ? (
+            // Customer Registration Form
+            <form onSubmit={handleRegister}>
+              <h2 style={{ fontSize: '1.25rem', marginBottom: '1.25rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '8px', color: '#a78bfa', textAlign: 'center' }}>📝 Register Guest Account</h2>
+              
+              <div className="form-group">
+                <label className="form-label">Email Address (Username)</label>
+                <input
+                  type="email"
+                  className="input-control"
+                  placeholder="Enter email address"
+                  value={regEmail}
+                  onChange={e => setRegEmail(e.target.value)}
+                  disabled={loading}
+                  required
+                />
+              </div>
 
-            <div className="form-group">
-              <label className="form-label">Password</label>
-              <input
-                type="password"
-                className="input-control"
-                placeholder="Enter password"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                disabled={loading}
-                required
-              />
-            </div>
+              <div className="form-group">
+                <label className="form-label">Password</label>
+                <input
+                  type="password"
+                  className="input-control"
+                  placeholder="Enter password"
+                  value={regPassword}
+                  onChange={e => setRegPassword(e.target.value)}
+                  disabled={loading}
+                  required
+                />
+              </div>
 
-            <div className="form-group" style={{ marginTop: '1rem', marginBottom: '1.5rem' }}>
-              <label className="form-label">Hotel Code or Name</label>
-              <input
-                type="text"
-                className="input-control"
-                placeholder="Enter hotel code or name (e.g. GPL01 or Golden Plaza)"
-                value={hotelCodeInput}
-                onChange={e => setHotelCodeInput(e.target.value)}
-                disabled={loading}
-                required
-              />
-            </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                <div className="form-group">
+                  <label className="form-label">First Name</label>
+                  <input
+                    type="text"
+                    className="input-control"
+                    placeholder="First Name"
+                    value={regFirstName}
+                    onChange={e => setRegFirstName(e.target.value)}
+                    disabled={loading}
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Last Name</label>
+                  <input
+                    type="text"
+                    className="input-control"
+                    placeholder="Last Name"
+                    value={regLastName}
+                    onChange={e => setRegLastName(e.target.value)}
+                    disabled={loading}
+                    required
+                  />
+                </div>
+              </div>
 
-            <button
-              type="submit"
-              className="btn-submit"
-              disabled={loading || !username || !password || !hotelCodeInput}
-            >
-              {loading ? 'Authenticating...' : 'Sign In'}
-            </button>
-          </form>
+              <div className="form-group" style={{ marginTop: '0.5rem', marginBottom: '1.5rem' }}>
+                <label className="form-label">Phone Number (10 digits)</label>
+                <input
+                  type="tel"
+                  className="input-control"
+                  placeholder="Enter 10-digit mobile number"
+                  maxLength={10}
+                  value={regPhone}
+                  onChange={e => setRegPhone(e.target.value.replace(/\D/g, ''))}
+                  disabled={loading}
+                  required
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="btn-submit"
+                disabled={loading || !regEmail || !regPassword || !regFirstName || !regLastName || !regPhone}
+              >
+                {loading ? 'Registering Account...' : 'Register'}
+              </button>
+
+              <div style={{ textAlign: 'center', marginTop: '1rem', fontSize: '0.85rem' }}>
+                Already have an account?{' '}
+                <span 
+                  onClick={() => setIsRegisterMode(false)} 
+                  style={{ color: '#a78bfa', cursor: 'pointer', textDecoration: 'underline' }}
+                >
+                  Sign In
+                </span>
+              </div>
+            </form>
+          ) : (
+            // Login Form
+            <form onSubmit={handleLogin}>
+              <h2 style={{ fontSize: '1.25rem', marginBottom: '1.25rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '8px', color: '#a78bfa', textAlign: 'center' }}>🔑 Sign In</h2>
+              
+              <div className="form-group">
+                <label className="form-label">Username</label>
+                <input
+                  type="text"
+                  className="input-control"
+                  placeholder="Enter username"
+                  value={username}
+                  onChange={e => setUsername(e.target.value)}
+                  disabled={loading}
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Password</label>
+                <input
+                  type="password"
+                  className="input-control"
+                  placeholder="Enter password"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  disabled={loading}
+                  required
+                />
+              </div>
+
+              <div className="form-group" style={{ marginTop: '1rem', marginBottom: '1.5rem' }}>
+                <label className="form-label">Hotel Code or Name</label>
+                <input
+                  type="text"
+                  className="input-control"
+                  placeholder="Enter hotel code or name (e.g. ABH01 or Golden Plaza)"
+                  value={hotelCodeInput}
+                  onChange={e => setHotelCodeInput(e.target.value)}
+                  disabled={loading}
+                  required
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="btn-submit"
+                disabled={loading || !username || !password || !hotelCodeInput}
+              >
+                {loading ? 'Authenticating...' : 'Sign In'}
+              </button>
+
+              <div style={{ textAlign: 'center', marginTop: '1rem', fontSize: '0.85rem' }}>
+                New guest?{' '}
+                <span 
+                  onClick={() => setIsRegisterMode(true)} 
+                  style={{ color: '#a78bfa', cursor: 'pointer', textDecoration: 'underline' }}
+                >
+                  Register Account
+                </span>
+              </div>
+            </form>
+          )}
         </div>
       )}
 
