@@ -243,14 +243,8 @@ function App() {
   const handleRegister = (e) => {
     e.preventDefault();
 
-    if (!regEmail || !regPassword || !regFirstName || !regLastName || !regPhone) {
-      triggerToast('Please fill out all registration fields.');
-      return;
-    }
-
-    const phoneRegex = /^\d{10}$/;
-    if (!phoneRegex.test(regPhone)) {
-      triggerToast('Phone number must be exactly 10 digits.');
+    if (!regEmail || !regPassword) {
+      triggerToast('Please fill out both email and password fields.');
       return;
     }
 
@@ -262,10 +256,7 @@ function App() {
       },
       body: JSON.stringify({
         email: regEmail,
-        password: regPassword,
-        first_name: regFirstName,
-        last_name: regLastName,
-        phone: regPhone
+        password: regPassword
       })
     })
       .then(async res => {
@@ -3073,51 +3064,10 @@ function App() {
                 />
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                <div className="form-group">
-                  <label className="form-label">First Name</label>
-                  <input
-                    type="text"
-                    className="input-control"
-                    placeholder="First Name"
-                    value={regFirstName}
-                    onChange={e => setRegFirstName(e.target.value)}
-                    disabled={loading}
-                    required
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Last Name</label>
-                  <input
-                    type="text"
-                    className="input-control"
-                    placeholder="Last Name"
-                    value={regLastName}
-                    onChange={e => setRegLastName(e.target.value)}
-                    disabled={loading}
-                    required
-                  />
-                </div>
-              </div>
-
-              <div className="form-group" style={{ marginTop: '0.5rem', marginBottom: '1.5rem' }}>
-                <label className="form-label">Phone Number (10 digits)</label>
-                <input
-                  type="tel"
-                  className="input-control"
-                  placeholder="Enter 10-digit mobile number"
-                  maxLength={10}
-                  value={regPhone}
-                  onChange={e => setRegPhone(e.target.value.replace(/\D/g, ''))}
-                  disabled={loading}
-                  required
-                />
-              </div>
-
               <button
                 type="submit"
                 className="btn-submit"
-                disabled={loading || !regEmail || !regPassword || !regFirstName || !regLastName || !regPhone}
+                disabled={loading || !regEmail || !regPassword}
               >
                 {loading ? 'Registering Account...' : 'Register'}
               </button>

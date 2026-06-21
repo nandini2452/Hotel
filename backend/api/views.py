@@ -83,37 +83,35 @@ def register_customer(request):
     """
     email = request.data.get('email')
     password = request.data.get('password')
-    first_name = request.data.get('first_name', '')
-    last_name = request.data.get('last_name', '')
-    phone = request.data.get('phone', '')
 
-    if not email or not password or not first_name or not last_name or not phone:
-        return Response({"detail": "All fields (email, password, first name, last name, phone) are required."}, status=status.HTTP_400_BAD_REQUEST)
+    if not email or not password:
+        return Response({"detail": "Email (username) and password are required."}, status=status.HTTP_400_BAD_REQUEST)
         
     if User.objects.filter(username=email).exists():
         return Response({"detail": "An account with this email address already exists."}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Validate phone format (10 digits)
-    if not (len(phone) == 10 and phone.isdigit()):
-        return Response({"detail": "Phone number must be exactly 10 digits."}, status=status.HTTP_400_BAD_REQUEST)
-        
+    # Generate a unique dummy phone number
+    import random
+    import string
     from .models import Customer
-    if Customer.objects.filter(phone=phone).exists():
-        return Response({"detail": "A customer with this phone number already exists."}, status=status.HTTP_400_BAD_REQUEST)
+    
+    dummy_phone = "".join(random.choices(string.digits, k=10))
+    while Customer.objects.filter(phone=dummy_phone).exists():
+        dummy_phone = "".join(random.choices(string.digits, k=10))
 
     # 1. Create Django user
     user = User.objects.create_user(
         username=email,
         password=password,
         email=email,
-        first_name=first_name,
-        last_name=last_name
+        first_name="",
+        last_name=""
     )
 
     # 2. Create customer profile
     Customer.objects.create(
         user=user,
-        phone=phone
+        phone=dummy_phone
     )
 
     # 3. Generate Token
