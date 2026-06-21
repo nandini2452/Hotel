@@ -5,6 +5,12 @@ const TIME_OPTIONS = [
   '12:00 PM', '1:00 PM', '2:00 PM', '3:00 PM', '4:00 PM', '5:00 PM', '6:00 PM', '7:00 PM', '8:00 PM', '9:00 PM', '10:00 PM', '11:00 PM'
 ];
 
+const ROOM_TYPE_METADATA = {
+  Standard: { price: 1500, minAdvance: 500 },
+  Deluxe: { price: 2500, minAdvance: 1000 },
+  Superior: { price: 4000, minAdvance: 2000 }
+};
+
 function App() {
   const [hotelCodeInput, setHotelCodeInput] = useState('');
   const [username, setUsername] = useState('');
@@ -15,6 +21,7 @@ function App() {
   const [loggedInUser, setLoggedInUser] = useState(localStorage.getItem('hotel_username') || '');
   const [hotelCode, setHotelCode] = useState(localStorage.getItem('hotel_code') || '');
   const [hotelName, setHotelName] = useState(localStorage.getItem('hotel_name') || '');
+  const [userRole, setUserRole] = useState(localStorage.getItem('hotel_role') || '');
 
   // Grid / Modal states
   const [rooms, setRooms] = useState([]);
@@ -41,7 +48,8 @@ function App() {
     advance_paid: 0,
     advance_status: 'Paid',
     payment_method: 'Cash',
-    receipt_id: ''
+    receipt_id: '',
+    room_type: 'Standard'
   });
 
   const [startDate, setStartDate] = useState(new Date());
@@ -101,6 +109,17 @@ function App() {
     window.addEventListener('click', handleGlobalClick);
     return () => window.removeEventListener('click', handleGlobalClick);
   }, [contextMenu.visible]);
+
+  // Pre-fill customer details if logged in as customer
+  useEffect(() => {
+    if (token && userRole === 'customer') {
+      setNewBooking(prev => ({
+        ...prev,
+        guest_email: loggedInUser,
+        room_type: 'Standard'
+      }));
+    }
+  }, [token, userRole, loggedInUser]);
 
   // Helper: formats date to YYYY-MM-DD
   const formatDate = (date) => {
@@ -225,11 +244,13 @@ function App() {
         localStorage.setItem('hotel_username', data.username);
         localStorage.setItem('hotel_code', data.hotel_code);
         localStorage.setItem('hotel_name', data.hotel_name);
+        localStorage.setItem('hotel_role', data.role);
         
         setToken(data.token);
         setLoggedInUser(data.username);
         setHotelCode(data.hotel_code);
         setHotelName(data.hotel_name);
+        setUserRole(data.role);
         
         // Reset form
         setUsername('');
@@ -248,10 +269,12 @@ function App() {
     localStorage.removeItem('hotel_username');
     localStorage.removeItem('hotel_code');
     localStorage.removeItem('hotel_name');
+    localStorage.removeItem('hotel_role');
     setToken('');
     setLoggedInUser('');
     setHotelCode('');
     setHotelName('');
+    setUserRole('');
     setHotelCodeInput('');
     setRooms([]);
     setBookings([]);
@@ -478,6 +501,45 @@ function App() {
         triggerToast('Guest checked in successfully!');
         setSelectedBooking(data);
         setBookings(prev => prev.map(b => b.id === data.id ? data : b));
+        refreshBookings(data.id);
+      })
+      .catch(err => triggerToast(err.message));
+  };
+
+  const handleUpdateBookingStatus = (bookingId, newStatus) => {
+    if (newStatus === 'Checked_out') {
+      const targetBooking = bookings.find(b => b.id === bookingId) || selectedBooking;
+      if (!targetBooking) return;
+      setCheckoutPaymentMethod('Cash');
+      setCheckoutReceiptId('');
+      setCheckoutModalOpen(true);
+      return;
+    }
+
+    fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/${bookingId}/`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Token ${token}`
+      },
+      body: JSON.stringify({ status: newStatus })
+    })
+      .then(async res => {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed to update status');
+        return data;
+      })
+      .then(data => {
+        triggerToast(`Status updated successfully!`);
+        setSelectedBooking(data);
+        setBookings(prev => prev.map(b => b.id === data.id ? data : b));
+        
+        fetch(`http://127.0.0.1:8000/api/my-hotel/rooms/?hotel_code=${hotelCode}`, {
+          headers: { 'Authorization': `Token ${token}` }
+        })
+          .then(res => res.json())
+          .then(roomData => setRooms(roomData));
+
         refreshBookings(data.id);
       })
       .catch(err => triggerToast(err.message));
@@ -900,6 +962,149 @@ function App() {
       });
   };
 
+  const handleCustomerCreateBooking = (e) => {
+    e.preventDefault();
+    
+    if (!newBooking.guest_first_name || !newBooking.guest_last_name || !newBooking.guest_phone || !newBooking.check_in || !newBooking.check_out) {
+      triggerToast('Please fill out all required fields.');
+      return;
+    }
+    
+    const phoneRegex = /^\d{10}$/;
+    if (!phoneRegex.test(newBooking.guest_phone)) {
+      triggerToast('Phone number must be exactly 10 digits.');
+      return;
+    }
+    
+    const cin = new Date(newBooking.check_in);
+    const cout = new Date(newBooking.check_out);
+    if (cout <= cin) {
+      triggerToast('Check-out date must be after check-in date.');
+      return;
+    }
+    
+    if (newBooking.kyc_number) {
+      const type = newBooking.kyc_type || 'Aadhaar';
+      const num = newBooking.kyc_number;
+      if (type === 'Aadhaar') {
+        const aadhaarRegex = /^\d{12}$/;
+        if (!aadhaarRegex.test(num)) {
+          triggerToast('Aadhaar number must be exactly 12 digits.');
+          return;
+        }
+      } else if (type === 'PAN') {
+        const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
+        if (!panRegex.test(num)) {
+          triggerToast('PAN Card number must be 10 characters in the format: 5 letters, 4 digits, 1 letter (e.g. ABCDE1234F).');
+          return;
+        }
+      }
+    }
+    
+    const metadata = ROOM_TYPE_METADATA[newBooking.room_type || 'Standard'];
+    const advancePaidNum = parseFloat(newBooking.advance_paid) || 0;
+    if (newBooking.advance_status === 'Paid') {
+      if (isNaN(advancePaidNum) || advancePaidNum < metadata.minAdvance) {
+        triggerToast(`Minimum required advance is ₹${metadata.minAdvance} for ${newBooking.room_type} rooms.`);
+        return;
+      }
+    }
+    
+    const formData = new FormData();
+    formData.append('room_type', newBooking.room_type || 'Standard');
+    formData.append('guest_first_name', newBooking.guest_first_name);
+    formData.append('guest_last_name', newBooking.guest_last_name);
+    formData.append('guest_phone', newBooking.guest_phone);
+    formData.append('guest_email', newBooking.guest_email || '');
+    formData.append('check_in', newBooking.check_in);
+    formData.append('check_out', newBooking.check_out);
+    formData.append('status', 'Booked');
+    formData.append('advance_paid', newBooking.advance_status === 'Unpaid' ? 0.00 : advancePaidNum);
+    formData.append('advance_status', newBooking.advance_status);
+    formData.append('payment_method', newBooking.payment_method);
+    formData.append('receipt_id', newBooking.receipt_id || '');
+    
+    if (newBooking.kyc_type) {
+      formData.append('kyc_type', newBooking.kyc_type);
+    }
+    if (newBooking.kyc_number) {
+      formData.append('kyc_number', newBooking.kyc_number);
+    }
+    if (newBooking.kyc_front) {
+      formData.append('kyc_front', newBooking.kyc_front);
+    }
+    if (newBooking.kyc_back) {
+      formData.append('kyc_back', newBooking.kyc_back);
+    }
+    
+    setLoading(true);
+    fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/?hotel_code=${hotelCode}`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Token ${token}`
+      },
+      body: formData
+    })
+      .then(async res => {
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.detail || 'Failed to save booking');
+        }
+        return data;
+      })
+      .then(data => {
+        triggerToast('Reservation created successfully!');
+        
+        if (newBooking.advance_status === 'Paid' && advancePaidNum > 0) {
+          const receipt = {
+            type: 'payment',
+            guestName: `${data.guest_first_name} ${data.guest_last_name}`,
+            roomNumber: data.room_number,
+            amount: advancePaidNum,
+            paymentMethod: newBooking.payment_method,
+            receiptId: newBooking.receipt_id,
+            timestamp: new Date().toLocaleString()
+          };
+          setReceiptData(receipt);
+          setReceiptModalOpen(true);
+        }
+        
+        setNewBooking({
+          guest_first_name: '',
+          guest_last_name: '',
+          guest_phone: '',
+          guest_email: loggedInUser,
+          check_in: '',
+          check_in_time: '11:30 AM',
+          check_out: '',
+          check_out_time: '11:30 AM',
+          status: 'Booked',
+          advance_paid: 0,
+          advance_status: 'Paid',
+          payment_method: 'Cash',
+          receipt_id: '',
+          room_type: 'Standard',
+          kyc_type: 'Aadhaar',
+          kyc_number: '',
+          kyc_front: null,
+          kyc_back: null
+        });
+        
+        fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/?hotel_code=${hotelCode}`, {
+          headers: { 'Authorization': `Token ${token}` }
+        })
+          .then(res => res.json())
+          .then(bookingsData => setBookings(bookingsData));
+           
+        setLoading(false);
+      })
+      .catch(err => {
+        console.error(err);
+        triggerToast(err.message || 'Error occurred while saving reservation.');
+        setLoading(false);
+      });
+  };
+
   const handleDeleteBooking = () => {
     const isDirty = selectedRoom?.cleanliness === 'dirty';
     const confirmMsg = isDirty 
@@ -1231,197 +1436,528 @@ function App() {
             </div>
           </div>
 
-          {/* Stay Expiry Alerts */}
-          {overdueBookings.length > 0 && (
-            <div className="overdue-alerts-container">
-              <div className="alerts-header">
-                <span className="alerts-icon">⚠️</span>
-                <h3>Overdue Check-Out Alerts ({overdueBookings.length})</h3>
-              </div>
-              <div className="alerts-list">
-                {overdueBookings.map(b => (
-                  <div key={b.id} className="alert-card">
-                    <div className="alert-info">
-                      <span style={{ fontSize: '1rem' }}>
-                        Room <strong>{b.room_number}</strong> ({b.room_type}) - Guest: <strong>{b.guest_first_name} {b.guest_last_name}</strong>
-                      </span>
-                      <span className="alert-time-badge">
-                        ⏰ Scheduled Check-Out was: {b.check_out} at {b.check_out_time}
-                      </span>
-                    </div>
-                    <div className="alert-actions">
-                      <button 
-                        className="btn-checkout-alert"
-                        onClick={() => handleQuickCheckout(b.id)}
-                      >
-                        Check-Out
-                      </button>
-                      <button 
-                        className="btn-contact-alert"
-                        onClick={() => handleOpenContactModal(b)}
-                      >
-                        Contact Guest
-                      </button>
+          {userRole === 'customer' ? (
+            <div className="customer-dashboard-grid" style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.8fr', gap: '1.5rem', marginTop: '0.5rem' }}>
+              {/* Left Card: Booking Form */}
+              <div className="calendar-card" style={{ padding: '1.5rem' }}>
+                <h2 style={{ fontSize: '1.25rem', marginBottom: '1.25rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '8px', color: '#a78bfa' }}>🛎️ Book a Room</h2>
+                <form onSubmit={handleCustomerCreateBooking} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div className="form-group">
+                    <label className="form-label">Room Category</label>
+                    <select
+                      className="input-control"
+                      value={newBooking.room_type || 'Standard'}
+                      onChange={e => {
+                        const type = e.target.value;
+                        setNewBooking(prev => ({
+                          ...prev,
+                          room_type: type,
+                          advance_paid: prev.advance_status === 'Paid' ? ROOM_TYPE_METADATA[type].minAdvance : 0
+                        }));
+                      }}
+                      style={{ background: 'rgba(15, 23, 42, 0.85)', color: '#fff' }}
+                    >
+                      <option value="Standard">Standard Room (₹1,500/night)</option>
+                      <option value="Deluxe">Deluxe Room (₹2,500/night)</option>
+                      <option value="Superior">Superior Room (₹4,000/night)</option>
+                    </select>
+                  </div>
+
+                  <div className="room-summary-box" style={{ padding: '10px 12px', marginBottom: '4px' }}>
+                    <div className="summary-grid" style={{ fontSize: '0.8rem', gap: '6px' }}>
+                      <div className="summary-item">Nightly Price: <span>₹{ROOM_TYPE_METADATA[newBooking.room_type || 'Standard'].price.toLocaleString('en-IN')}</span></div>
+                      <div className="summary-item">Min Advance Required: <span>₹{ROOM_TYPE_METADATA[newBooking.room_type || 'Standard'].minAdvance.toLocaleString('en-IN')}</span></div>
+                      {newBooking.check_in && newBooking.check_out && (
+                        <>
+                          <div className="summary-item">Stay Nights: <span>{Math.max(1, Math.round((new Date(newBooking.check_out) - new Date(newBooking.check_in)) / (1000 * 60 * 60 * 24)))}</span></div>
+                          <div className="summary-item">Estimated Cost: <span>₹{(Math.max(1, Math.round((new Date(newBooking.check_out) - new Date(newBooking.check_in)) / (1000 * 60 * 60 * 24))) * ROOM_TYPE_METADATA[newBooking.room_type || 'Standard'].price).toLocaleString('en-IN')}</span></div>
+                        </>
+                      )}
                     </div>
                   </div>
-                ))}
-              </div>
-            </div>
-          )}
 
-          {/* Front Desk Scheduler Grid */}
-          <div className="calendar-card">
-            <div className="calendar-header-actions" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
-              <h2>Front Desk Booking Calendar Grid</h2>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                <button 
-                  className="btn-cancel" 
-                  style={{ padding: '6px 12px', fontSize: '0.75rem', background: 'rgba(255,255,255,0.08)', borderColor: 'rgba(255,255,255,0.15)', height: '30px', display: 'flex', alignItems: 'center' }}
-                  onClick={() => setStartDate(new Date())}
-                >
-                  📅 Today
-                </button>
-                <button 
-                  className="btn-cancel" 
-                  style={{ padding: '6px 12px', fontSize: '0.75rem', background: 'rgba(255,255,255,0.08)', borderColor: 'rgba(255,255,255,0.15)', height: '30px', display: 'flex', alignItems: 'center' }}
-                  onClick={() => {
-                    const prev = new Date(startDate);
-                    prev.setDate(prev.getDate() - 14);
-                    setStartDate(prev);
-                  }}
-                >
-                  ◀ 14 Days
-                </button>
-                <button 
-                  className="btn-cancel" 
-                  style={{ padding: '6px 12px', fontSize: '0.75rem', background: 'rgba(255,255,255,0.08)', borderColor: 'rgba(255,255,255,0.15)', height: '30px', display: 'flex', alignItems: 'center' }}
-                  onClick={() => {
-                    const next = new Date(startDate);
-                    next.setDate(next.getDate() + 14);
-                    setStartDate(next);
-                  }}
-                >
-                  14 Days ▶
-                </button>
-              </div>
-              <div className="calendar-legend">
-                <div className="legend-item">
-                  <div className="legend-color" style={{ background: 'linear-gradient(135deg, #2563eb, #1d4ed8)' }}></div>
-                  <span>Booked</span>
-                </div>
-                <div className="legend-item">
-                  <div className="legend-color" style={{ background: 'linear-gradient(135deg, #16a34a, #15803d)' }}></div>
-                  <span>Checked-In</span>
-                </div>
-                <div className="legend-item">
-                  <div className="legend-color" style={{
-                    background: 'repeating-linear-gradient(45deg, #374151, #374151 4px, #1f2937 4px, #1f2937 8px)',
-                    border: '1px solid #9ca3af'
-                  }}></div>
-                  <span>🧹 Needs Cleaning</span>
-                </div>
-              </div>
-            </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                    <div className="form-group">
+                      <label className="form-label">First Name</label>
+                      <input
+                        type="text"
+                        className="input-control"
+                        required
+                        value={newBooking.guest_first_name}
+                        onChange={e => setNewBooking(prev => ({ ...prev, guest_first_name: e.target.value }))}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Last Name</label>
+                      <input
+                        type="text"
+                        className="input-control"
+                        required
+                        value={newBooking.guest_last_name}
+                        onChange={e => setNewBooking(prev => ({ ...prev, guest_last_name: e.target.value }))}
+                      />
+                    </div>
+                  </div>
 
-            <div className="calendar-scroll">
-              <table className="calendar-table">
-                <thead>
-                  <tr>
-                    <th className="room-column-header">
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-                        <span>Room Details</span>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }} title="Click calendar to book prior / choose date">
-                          <span style={{ fontSize: '0.85rem', color: '#60a5fa', cursor: 'pointer' }} onClick={() => {
-                            const dp = document.getElementById('calendar-jump-date-picker');
-                            if (dp && typeof dp.showPicker === 'function') dp.showPicker();
-                          }}>➕</span>
-                          <input 
-                            id="calendar-jump-date-picker"
-                            type="date"
-                            style={{ 
-                              background: '#0f172a',
-                              border: '1px solid rgba(255,255,255,0.15)',
-                              borderRadius: '4px',
-                              color: '#fff', 
-                              fontSize: '0.7rem', 
-                              outline: 'none', 
-                              cursor: 'pointer',
-                              padding: '2px 4px',
-                              width: '115px'
-                            }}
-                            value={startDate.toISOString().split('T')[0]} 
-                            onChange={(e) => {
-                              if (e.target.value) {
-                                setStartDate(new Date(e.target.value));
-                              }
-                            }}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                    <div className="form-group">
+                      <label className="form-label">Phone Number</label>
+                      <input
+                        type="tel"
+                        className="input-control"
+                        required
+                        maxLength={10}
+                        pattern="\d{10}"
+                        placeholder="Enter 10-digit phone"
+                        value={newBooking.guest_phone}
+                        onChange={e => {
+                          const val = e.target.value.replace(/\D/g, '');
+                          setNewBooking(prev => ({ ...prev, guest_phone: val }));
+                        }}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Email Address</label>
+                      <input
+                        type="email"
+                        className="input-control"
+                        disabled
+                        value={newBooking.guest_email || ''}
+                        style={{ opacity: 0.7, cursor: 'not-allowed' }}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                    <div className="form-group">
+                      <label className="form-label">Check-In Date</label>
+                      <input
+                        type="date"
+                        className="input-control"
+                        required
+                        value={newBooking.check_in}
+                        onChange={e => setNewBooking(prev => ({ ...prev, check_in: e.target.value }))}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Check-Out Date</label>
+                      <input
+                        type="date"
+                        className="input-control"
+                        required
+                        value={newBooking.check_out}
+                        onChange={e => setNewBooking(prev => ({ ...prev, check_out: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ borderTop: '1px dashed rgba(255,255,255,0.05)', paddingTop: '10px', marginTop: '4px' }}>
+                    <label className="form-label" style={{ fontWeight: 'bold', fontSize: '0.8rem', color: 'var(--primary)', marginBottom: '8px', display: 'block' }}>🆔 Customer KYC Verification</label>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: '10px' }}>
+                      <div className="form-group">
+                        <label className="form-label">ID Type</label>
+                        <select
+                          className="input-control"
+                          value={newBooking.kyc_type || 'Aadhaar'}
+                          onChange={e => {
+                            const type = e.target.value;
+                            setNewBooking(prev => ({ ...prev, kyc_type: type, kyc_number: '' }));
+                          }}
+                          style={{ background: 'rgba(15, 23, 42, 0.85)', color: '#fff' }}
+                        >
+                          <option value="Aadhaar">Aadhaar</option>
+                          <option value="PAN">PAN Card</option>
+                        </select>
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">ID Number</label>
+                        <input
+                          type="text"
+                          className="input-control"
+                          placeholder={newBooking.kyc_type === 'PAN' ? 'ABCDE1234F' : 'Enter 12 digits'}
+                          maxLength={newBooking.kyc_type === 'PAN' ? 10 : 12}
+                          value={newBooking.kyc_number || ''}
+                          onChange={e => {
+                            let val = e.target.value;
+                            const currentType = newBooking.kyc_type || 'Aadhaar';
+                            if (currentType === 'Aadhaar') {
+                              val = val.replace(/\D/g, '').slice(0, 12);
+                            } else {
+                              val = val.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 10);
+                            }
+                            setNewBooking(prev => ({ ...prev, kyc_number: val }));
+                          }}
+                        />
+                      </div>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '8px' }}>
+                      <div className="form-group">
+                        <label className="form-label">ID Front File</label>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="input-control"
+                          style={{ padding: '6px 8px', fontSize: '0.75rem', height: '36px' }}
+                          onChange={e => {
+                            const file = e.target.files[0];
+                            setNewBooking(prev => ({ ...prev, kyc_front: file }));
+                          }}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">ID Back File</label>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="input-control"
+                          style={{ padding: '6px 8px', fontSize: '0.75rem', height: '36px' }}
+                          onChange={e => {
+                            const file = e.target.files[0];
+                            setNewBooking(prev => ({ ...prev, kyc_back: file }));
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ borderTop: '1px dashed rgba(255,255,255,0.05)', paddingTop: '10px', marginTop: '4px' }}>
+                    <label className="form-label" style={{ fontWeight: 'bold', fontSize: '0.8rem', color: 'var(--primary)', marginBottom: '8px', display: 'block' }}>💳 Advance Payment Status</label>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: '10px' }}>
+                      <div className="form-group">
+                        <label className="form-label">Advance Status</label>
+                        <select
+                          className="input-control"
+                          value={newBooking.advance_status}
+                          onChange={e => {
+                            const status = e.target.value;
+                            setNewBooking(prev => ({
+                              ...prev,
+                              advance_status: status,
+                              advance_paid: status === 'Unpaid' ? 0 : ROOM_TYPE_METADATA[prev.room_type || 'Standard'].minAdvance
+                            }));
+                          }}
+                          style={{ background: 'rgba(15, 23, 42, 0.85)', color: '#fff' }}
+                        >
+                          <option value="Paid">Paid</option>
+                          <option value="Unpaid">Unpaid</option>
+                        </select>
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">Advance Amount (₹)</label>
+                        <input
+                          type="number"
+                          className="input-control"
+                          required
+                          disabled={newBooking.advance_status === 'Unpaid'}
+                          min={newBooking.advance_status === 'Paid' ? ROOM_TYPE_METADATA[newBooking.room_type || 'Standard'].minAdvance : 0}
+                          value={newBooking.advance_status === 'Unpaid' ? 0 : newBooking.advance_paid}
+                          onChange={e => setNewBooking(prev => ({ ...prev, advance_paid: e.target.value }))}
+                          style={newBooking.advance_status === 'Unpaid' ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
+                        />
+                      </div>
+                    </div>
+                    {newBooking.advance_status === 'Paid' && (
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: '10px', marginTop: '8px' }}>
+                        <div className="form-group">
+                          <label className="form-label">Payment Method</label>
+                          <select
+                            className="input-control"
+                            value={newBooking.payment_method}
+                            onChange={e => setNewBooking(prev => ({ ...prev, payment_method: e.target.value }))}
+                            style={{ background: 'rgba(15, 23, 42, 0.85)', color: '#fff' }}
+                          >
+                            <option value="Cash">Cash</option>
+                            <option value="UPI">UPI</option>
+                            <option value="Card">Card</option>
+                          </select>
+                        </div>
+                        <div className="form-group">
+                          <label className="form-label">Receipt ID (Optional)</label>
+                          <input
+                            type="text"
+                            className="input-control"
+                            placeholder="Receipt ID"
+                            value={newBooking.receipt_id}
+                            onChange={e => setNewBooking(prev => ({ ...prev, receipt_id: e.target.value }))}
                           />
                         </div>
                       </div>
-                    </th>
-                    {dates.map((date, idx) => {
-                      const isToday = idx === 0;
-                      return (
-                        <th key={idx} className={`date-column-header ${isToday ? 'today' : ''}`}>
-                          <span className="date-day">{date.toLocaleDateString('en-US', { weekday: 'short' })}</span>
-                          <span className="date-num">{date.getDate()}</span>
-                        </th>
-                      );
-                    })}
-                  </tr>
-                </thead>
-                <tbody>
-                  {/* Standard Category */}
-                  <tr className="category-row">
-                    <td colSpan={15} className="category-title">
-                      Standard Rooms (Price: ₹1,500 | Min Advance: ₹500)
-                    </td>
-                  </tr>
-                  {rooms.filter(r => r.room_type === 'Standard').map(room => (
-                    <tr key={room.id}>
-                      <td className="room-cell">
-                        {room.number}
-                        <span className="room-type-badge">Standard - ₹1,500</span>
-                      </td>
-                      {renderCalendarCells(room)}
-                    </tr>
-                  ))}
+                    )}
+                  </div>
 
-                  {/* Deluxe Category */}
-                  <tr className="category-row">
-                    <td colSpan={15} className="category-title">
-                      Deluxe Rooms (Price: ₹2,500 | Min Advance: ₹1,000)
-                    </td>
-                  </tr>
-                  {rooms.filter(r => r.room_type === 'Deluxe').map(room => (
-                    <tr key={room.id}>
-                      <td className="room-cell">
-                        {room.number}
-                        <span className="room-type-badge">Deluxe - ₹2,500</span>
-                      </td>
-                      {renderCalendarCells(room)}
-                    </tr>
-                  ))}
+                  <button type="submit" className="btn-submit" disabled={loading} style={{ marginTop: '8px' }}>
+                    {loading ? 'Booking stays...' : '🚀 Confirm Reservation'}
+                  </button>
+                </form>
+              </div>
 
-                  {/* Superior Category */}
-                  <tr className="category-row">
-                    <td colSpan={15} className="category-title">
-                      Superior Rooms (Price: ₹4,000 | Min Advance: ₹2,000)
-                    </td>
-                  </tr>
-                  {rooms.filter(r => r.room_type === 'Superior').map(room => (
-                    <tr key={room.id}>
-                      <td className="room-cell">
-                        {room.number}
-                        <span className="room-type-badge">Superior - ₹4,000</span>
-                      </td>
-                      {renderCalendarCells(room)}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              {/* Right Card: Booking History Table */}
+              <div className="calendar-card" style={{ padding: '1.5rem', overflow: 'hidden' }}>
+                <h2 style={{ fontSize: '1.25rem', marginBottom: '1.25rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '8px', color: '#34d399' }}>📋 Your Booking History</h2>
+                <div style={{ overflowX: 'auto', maxHeight: '550px' }}>
+                  <table className="txn-table" style={{ width: '100%', fontSize: '0.85rem' }}>
+                    <thead>
+                      <tr>
+                        <th>Stay Dates</th>
+                        <th>Room</th>
+                        <th>Type</th>
+                        <th>Billing Info</th>
+                        <th>Status</th>
+                        <th>KYC</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {bookings.length > 0 ? (
+                        bookings.map(b => (
+                          <tr key={b.id}>
+                            <td style={{ fontWeight: '600' }}>
+                              {b.check_in} to {b.check_out}
+                            </td>
+                            <td>
+                              <strong>Room {b.room_number}</strong>
+                            </td>
+                            <td>{b.room_type}</td>
+                            <td>
+                              <div>Total: ₹{parseFloat(b.total_cost).toLocaleString('en-IN')}</div>
+                              <div style={{ fontSize: '0.75rem', color: parseFloat(b.outstanding_amount) > 0 ? '#fb7185' : '#4ade80' }}>
+                                Outstanding: ₹{parseFloat(b.outstanding_amount).toLocaleString('en-IN')}
+                              </div>
+                            </td>
+                            <td>
+                              <span style={{
+                                padding: '2px 6px',
+                                borderRadius: '4px',
+                                fontSize: '0.7rem',
+                                fontWeight: 'bold',
+                                background: b.checked_out
+                                  ? 'rgba(239, 68, 68, 0.2)'
+                                  : b.status === 'Checked_in'
+                                  ? 'rgba(34, 197, 94, 0.2)'
+                                  : 'rgba(59, 130, 246, 0.2)',
+                                color: b.checked_out ? '#ef4444' : b.status === 'Checked_in' ? '#4ade80' : '#60a5fa'
+                              }}>
+                                {b.checked_out ? 'Checked-Out' : b.status === 'Checked_in' ? 'Checked-In' : 'Booked'}
+                              </span>
+                            </td>
+                            <td>
+                              <span style={{
+                                padding: '2px 6px',
+                                borderRadius: '4px',
+                                fontSize: '0.7rem',
+                                fontWeight: 'bold',
+                                background: b.kyc?.kyc_verified ? 'rgba(34, 197, 94, 0.2)' : 'rgba(245, 158, 11, 0.2)',
+                                color: b.kyc?.kyc_verified ? '#4ade80' : '#fbbf24'
+                              }}>
+                                {b.kyc?.kyc_verified ? 'Verified' : 'Pending'}
+                              </span>
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan="6" style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '24px' }}>No stays booked yet. Book your first room above!</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
-          </div>
+          ) : (
+            <>
+              {/* Stay Expiry Alerts */}
+              {overdueBookings.length > 0 && (
+                <div className="overdue-alerts-container">
+                  <div className="alerts-header">
+                    <span className="alerts-icon">⚠️</span>
+                    <h3>Overdue Check-Out Alerts ({overdueBookings.length})</h3>
+                  </div>
+                  <div className="alerts-list">
+                    {overdueBookings.map(b => (
+                      <div key={b.id} className="alert-card">
+                        <div className="alert-info">
+                          <span style={{ fontSize: '1rem' }}>
+                            Room <strong>{b.room_number}</strong> ({b.room_type}) - Guest: <strong>{b.guest_first_name} {b.guest_last_name}</strong>
+                          </span>
+                          <span className="alert-time-badge">
+                            ⏰ Scheduled Check-Out was: {b.check_out} at {b.check_out_time}
+                          </span>
+                        </div>
+                        <div className="alert-actions">
+                          <button 
+                            className="btn-checkout-alert"
+                            onClick={() => handleQuickCheckout(b.id)}
+                          >
+                            Check-Out
+                          </button>
+                          <button 
+                            className="btn-contact-alert"
+                            onClick={() => handleOpenContactModal(b)}
+                          >
+                            Contact Guest
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Front Desk Scheduler Grid */}
+              <div className="calendar-card">
+                <div className="calendar-header-actions" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+                  <h2>Front Desk Booking Calendar Grid</h2>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <button 
+                      className="btn-cancel" 
+                      style={{ padding: '6px 12px', fontSize: '0.75rem', background: 'rgba(255,255,255,0.08)', borderColor: 'rgba(255,255,255,0.15)', height: '30px', display: 'flex', alignItems: 'center' }}
+                      onClick={() => setStartDate(new Date())}
+                    >
+                      📅 Today
+                    </button>
+                    <button 
+                      className="btn-cancel" 
+                      style={{ padding: '6px 12px', fontSize: '0.75rem', background: 'rgba(255,255,255,0.08)', borderColor: 'rgba(255,255,255,0.15)', height: '30px', display: 'flex', alignItems: 'center' }}
+                      onClick={() => {
+                        const prev = new Date(startDate);
+                        prev.setDate(prev.getDate() - 14);
+                        setStartDate(prev);
+                      }}
+                    >
+                      ◀ 14 Days
+                    </button>
+                    <button 
+                      className="btn-cancel" 
+                      style={{ padding: '6px 12px', fontSize: '0.75rem', background: 'rgba(255,255,255,0.08)', borderColor: 'rgba(255,255,255,0.15)', height: '30px', display: 'flex', alignItems: 'center' }}
+                      onClick={() => {
+                        const next = new Date(startDate);
+                        next.setDate(next.getDate() + 14);
+                        setStartDate(next);
+                      }}
+                    >
+                      14 Days ▶
+                    </button>
+                  </div>
+                  <div className="calendar-legend">
+                    <div className="legend-item">
+                      <div className="legend-color" style={{ background: 'linear-gradient(135deg, #2563eb, #1d4ed8)' }}></div>
+                      <span>Booked</span>
+                    </div>
+                    <div className="legend-item">
+                      <div className="legend-color" style={{ background: 'linear-gradient(135deg, #16a34a, #15803d)' }}></div>
+                      <span>Checked-In</span>
+                    </div>
+                    <div className="legend-item">
+                      <div className="legend-color" style={{
+                        background: 'repeating-linear-gradient(45deg, #374151, #374151 4px, #1f2937 4px, #1f2937 8px)',
+                        border: '1px solid #9ca3af'
+                      }}></div>
+                      <span>🧹 Needs Cleaning</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="calendar-scroll">
+                  <table className="calendar-table">
+                    <thead>
+                      <tr>
+                        <th className="room-column-header">
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                            <span>Room Details</span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }} title="Click calendar to book prior / choose date">
+                              <span style={{ fontSize: '0.85rem', color: '#60a5fa', cursor: 'pointer' }} onClick={() => {
+                                const dp = document.getElementById('calendar-jump-date-picker');
+                                if (dp && typeof dp.showPicker === 'function') dp.showPicker();
+                              }}>➕</span>
+                              <input 
+                                id="calendar-jump-date-picker"
+                                type="date"
+                                style={{ 
+                                  background: '#0f172a',
+                                  border: '1px solid rgba(255,255,255,0.15)',
+                                  borderRadius: '4px',
+                                  color: '#fff', 
+                                  fontSize: '0.7rem', 
+                                  outline: 'none', 
+                                  cursor: 'pointer',
+                                  padding: '2px 4px',
+                                  width: '115px'
+                                }}
+                                onChange={e => {
+                                  if (e.target.value) {
+                                    setStartDate(new Date(e.target.value));
+                                  }
+                                }}
+                              />
+                            </div>
+                          </div>
+                        </th>
+                        {dates.map((d, index) => {
+                          const isToday = formatDate(d) === formatDate(new Date());
+                          return (
+                            <th key={index} className={`date-column-header ${isToday ? 'today' : ''}`}>
+                              <div className="date-header-day">{d.toLocaleDateString('en-US', { weekday: 'short' })}</div>
+                              <div className="date-header-num">{d.getDate()}</div>
+                              <div className="date-header-month">{d.toLocaleDateString('en-US', { month: 'short' })}</div>
+                            </th>
+                          );
+                        })}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {/* Standard Category */}
+                      <tr className="category-row">
+                        <td colSpan={15} className="category-title">
+                          Standard Rooms (Price: ₹1,500 | Min Advance: ₹500)
+                        </td>
+                      </tr>
+                      {rooms.filter(r => r.room_type === 'Standard').map(room => (
+                        <tr key={room.id}>
+                          <td className="room-cell">
+                            {room.number}
+                            <span className="room-type-badge">Standard - ₹1,500</span>
+                          </td>
+                          {renderCalendarCells(room)}
+                        </tr>
+                      ))}
+
+                      {/* Deluxe Category */}
+                      <tr className="category-row">
+                        <td colSpan={15} className="category-title">
+                          Deluxe Rooms (Price: ₹2,500 | Min Advance: ₹1,000)
+                        </td>
+                      </tr>
+                      {rooms.filter(r => r.room_type === 'Deluxe').map(room => (
+                        <tr key={room.id}>
+                          <td className="room-cell">
+                            {room.number}
+                            <span className="room-type-badge">Deluxe - ₹2,500</span>
+                          </td>
+                          {renderCalendarCells(room)}
+                        </tr>
+                      ))}
+
+                      {/* Superior Category */}
+                      <tr className="category-row">
+                        <td colSpan={15} className="category-title">
+                          Superior Rooms (Price: ₹4,000 | Min Advance: ₹2,000)
+                        </td>
+                      </tr>
+                      {rooms.filter(r => r.room_type === 'Superior').map(room => (
+                        <tr key={room.id}>
+                          <td className="room-cell">
+                            {room.number}
+                            <span className="room-type-badge">Superior - ₹4,000</span>
+                          </td>
+                          {renderCalendarCells(room)}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          )}
 
           {/* Quick Reservation Modal */}
           {modalOpen && (
@@ -1548,7 +2084,7 @@ function App() {
                       >
                         <option value="Booked">Booked</option>
                         <option value="Checked_in">Checked-In</option>
-                        <option value="dirty">Dirty (Needs Cleaning)</option>
+                        {isEditMode && <option value="Checked_out">Checked-Out</option>}
                       </select>
                     </div>
                     <div className="form-group">
@@ -1858,52 +2394,6 @@ function App() {
 
                           <span style={{ color: 'var(--text-secondary)' }}>Check-out Time:</span>
                           <strong>{selectedBooking.check_out_time}</strong>
-
-                          <span style={{ color: 'var(--text-secondary)' }}>Status:</span>
-                          <div>
-                            <span style={{
-                              padding: '2px 6px',
-                              borderRadius: '4px',
-                              fontSize: '0.7rem',
-                              fontWeight: 'bold',
-                              background: selectedBooking.checked_out
-                                ? 'rgba(239, 68, 68, 0.2)'
-                                : selectedBooking.status === 'Checked_in'
-                                ? 'rgba(34, 197, 94, 0.2)'
-                                : selectedBooking.status === 'Booked'
-                                ? 'rgba(59, 130, 246, 0.2)'
-                                : 'rgba(239, 68, 68, 0.2)',
-                              color: selectedBooking.checked_out
-                                ? '#ef4444'
-                                : selectedBooking.status === 'Checked_in'
-                                ? '#4ade80'
-                                : selectedBooking.status === 'Booked'
-                                ? '#60a5fa'
-                                : '#ef4444'
-                            }}>
-                              {selectedBooking.checked_out
-                                ? 'Checked-Out'
-                                : selectedBooking.status === 'Checked_in'
-                                ? 'Checked-In'
-                                : selectedBooking.status === 'Booked'
-                                ? 'Booked'
-                                : 'Checked-Out'}
-                            </span>
-                          </div>
-
-                          <span style={{ color: 'var(--text-secondary)' }}>Cleanliness:</span>
-                          <div>
-                            <span style={{
-                              padding: '2px 6px',
-                              borderRadius: '4px',
-                              fontSize: '0.7rem',
-                              fontWeight: 'bold',
-                              background: roomCleanliness === 'dirty' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(34, 197, 94, 0.2)',
-                              color: roomCleanliness === 'dirty' ? '#ef4444' : '#4ade80'
-                            }}>
-                              {roomCleanliness === 'dirty' ? '🧹 Needs Cleaning' : '✨ Cleaned'}
-                            </span>
-                          </div>
                         </div>
 
                         {/* KYC Info Section */}
@@ -2151,49 +2641,12 @@ function App() {
                     const roomIsDirty = currentRoomObj && currentRoomObj.cleanliness === 'dirty';
                     
                     return (
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        {!selectedBooking.checked_out && selectedBooking.status === 'Booked' && (
-                          <button 
-                            type="button" 
-                            className="btn-submit-modal" 
-                            style={{ background: 'rgba(34, 197, 94, 0.1)', borderColor: 'rgba(34, 197, 94, 0.3)', color: '#4ade80' }}
-                            onClick={() => handleCheckIn(selectedBooking.id)}
-                          >
-                            🟢 Check In
-                          </button>
-                        )}
-                        {!selectedBooking.checked_out && selectedBooking.status === 'Checked_in' && (
-                          <button 
-                            type="button" 
-                            className="btn-submit-modal" 
-                            style={{ background: 'rgba(167, 139, 250, 0.1)', borderColor: 'rgba(167, 139, 250, 0.3)', color: '#c084fc' }}
-                            onClick={() => {
-                              setCheckoutPaymentMethod('Cash');
-                              setCheckoutReceiptId('');
-                              setCheckoutModalOpen(true);
-                            }}
-                          >
-                            🚪 Check Out
-                          </button>
-                        )}
-                        {roomIsDirty && (
-                          <button 
-                            type="button" 
-                            className="btn-submit-modal" 
-                            style={{ background: 'rgba(34, 197, 94, 0.1)', borderColor: 'rgba(34, 197, 94, 0.3)', color: '#22c55e' }}
-                            onClick={() => {
-                              handleCloseInfoModal();
-                              handleQuickMarkCleaned(selectedBooking.id);
-                            }}
-                          >
-                            🧹 Mark as Cleaned
-                          </button>
-                        )}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
                         {!selectedBooking.checked_out && (
                           <button 
                             type="button" 
                             className="btn-cancel" 
-                            style={{ background: 'rgba(239, 68, 68, 0.1)', borderColor: 'rgba(239, 68, 68, 0.3)', color: '#ef4444' }}
+                            style={{ background: 'rgba(239, 68, 68, 0.1)', borderColor: 'rgba(239, 68, 68, 0.3)', color: '#ef4444', height: '30px', padding: '0 12px', display: 'flex', alignItems: 'center', fontSize: '0.75rem' }}
                             onClick={() => {
                               setCancelRefundAmount(selectedBooking.advance_paid);
                               setCancelPaymentMethod('Cash');
@@ -2204,11 +2657,25 @@ function App() {
                           </button>
                         )}
                         
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: '12px', borderLeft: '1px solid rgba(255, 255, 255, 0.1)', paddingLeft: '12px' }}>
-                          <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Room Cleanliness:</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: '6px' }}>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Status:</span>
                           <select
                             className="input-control-small"
-                            style={{ width: '185px' }}
+                            style={{ width: '130px', height: '30px' }}
+                            value={selectedBooking.checked_out ? 'Checked_out' : selectedBooking.status}
+                            onChange={e => handleUpdateBookingStatus(selectedBooking.id, e.target.value)}
+                          >
+                            <option value="Booked">📅 Booked</option>
+                            <option value="Checked_in">🟢 Checked-In</option>
+                            <option value="Checked_out">🚪 Checked-Out</option>
+                          </select>
+                        </div>
+                        
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: '6px', borderLeft: '1px solid rgba(255, 255, 255, 0.1)', paddingLeft: '12px' }}>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Cleanliness:</span>
+                          <select
+                            className="input-control-small"
+                            style={{ width: '160px', height: '30px' }}
                             value={roomIsDirty ? 'dirty' : 'clean'}
                             onChange={e => handleUpdateCleanliness(e.target.value)}
                           >

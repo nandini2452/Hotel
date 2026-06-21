@@ -1151,3 +1151,16 @@ select.input-control-small {
   margin-top: 4px;
 }
 
+.customer-dashboard-grid {
+  display: grid;
+  grid-template-columns: 1.2fr 1.8fr;
+  gap: 1.5rem;
+  margin-top: 0.5rem;
+}
+
+@media (max-width: 1024px) {
+  .customer-dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+}
+

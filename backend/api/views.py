@@ -48,12 +48,21 @@ def login_view(request):
     if not hotel:
         return Response({"detail": "Hotel with the specified code or name does not exist."}, status=status.HTTP_404_NOT_FOUND)
 
-    # 3. Check if user is owner or manager of that hotel
+    # 3. Check if user is owner, manager or customer of that hotel
     is_owner = hotel.owner == user
     is_manager = hotel.managers.filter(id=user.id).exists()
+    
+    from .models import Customer
+    is_customer = Customer.objects.filter(user=user).exists()
 
-    if not (is_owner or is_manager):
+    if not (is_owner or is_manager or is_customer):
         return Response({"detail": f"User {username} is not authorized for hotel {hotel.name}."}, status=status.HTTP_403_FORBIDDEN)
+
+    role = 'customer'
+    if is_owner:
+        role = 'owner'
+    elif is_manager:
+        role = 'manager'
 
     # 4. Generate/Retrieve Token
     token, _ = Token.objects.get_or_create(user=user)
@@ -62,7 +71,8 @@ def login_view(request):
         "token": token.key,
         "username": user.username,
         "hotel_name": hotel.name,
-        "hotel_code": hotel.code
+        "hotel_code": hotel.code,
+        "role": role
     }, status=status.HTTP_200_OK)
 
 @api_view(['GET'])
@@ -158,13 +168,19 @@ def my_hotel_bookings(request):
         except Hotel.DoesNotExist:
             return Response({"detail": "Hotel not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        # Check if user is owner or manager
+        # Check if user is owner, manager or customer
         is_owner = hotel.owner == user
         is_manager = hotel.managers.filter(id=user.id).exists()
-        if not (is_owner or is_manager):
+        is_customer = hasattr(user, 'customer_profile')
+        if not (is_owner or is_manager or is_customer):
             return Response({"detail": "Not authorized for this hotel."}, status=status.HTTP_403_FORBIDDEN)
 
-        bookings = Booking.objects.filter(room__hotel=hotel)
+        if is_customer:
+            # Customers only see their own bookings
+            bookings = Booking.objects.filter(room__hotel=hotel, customer=user.customer_profile)
+        else:
+            # Owners and managers see all bookings
+            bookings = Booking.objects.filter(room__hotel=hotel)
         data = []
         for b in bookings:
             # Calculate total nights and cost
@@ -224,6 +240,7 @@ def my_hotel_bookings(request):
 
     elif request.method == 'POST':
         room_id = request.data.get('room_id')
+        room_type_name = request.data.get('room_type')
         guest_first_name = request.data.get('guest_first_name')
         guest_last_name = request.data.get('guest_last_name')
         guest_phone = request.data.get('guest_phone')
@@ -237,26 +254,17 @@ def my_hotel_bookings(request):
         receipt_id = request.data.get('receipt_id')
         notes = request.data.get('notes', '')
 
-        if not all([room_id, guest_first_name, guest_last_name, guest_phone, check_in, check_out]):
+        if not (room_id or room_type_name):
+            return Response({"detail": "room_id or room_type is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not all([guest_first_name, guest_last_name, guest_phone, check_in, check_out]):
             return Response({"detail": "Missing required booking fields."}, status=status.HTTP_400_BAD_REQUEST)
 
         # Validate phone number is exactly 10 digits
         if not (len(guest_phone) == 10 and guest_phone.isdigit()):
             return Response({"detail": "Phone number must be exactly 10 digits."}, status=status.HTTP_400_BAD_REQUEST)
 
-        try:
-            room = Room.objects.get(id=room_id)
-        except Room.DoesNotExist:
-            return Response({"detail": "Room not found."}, status=status.HTTP_404_NOT_FOUND)
-
-        hotel = room.hotel
-        # Check authorization
-        is_owner = hotel.owner == user
-        is_manager = hotel.managers.filter(id=user.id).exists()
-        if not (is_owner or is_manager):
-            return Response({"detail": "Not authorized for this hotel."}, status=status.HTTP_403_FORBIDDEN)
-
-        # Parse check-in/check-out date strings
+        # Parse check-in/check-out date strings first
         try:
             check_in_date = datetime.datetime.strptime(check_in, "%Y-%m-%d").date()
             check_out_date = datetime.datetime.strptime(check_out, "%Y-%m-%d").date()
@@ -266,14 +274,57 @@ def my_hotel_bookings(request):
         if check_in_date >= check_out_date:
             return Response({"detail": "Check-out date must be after check-in date."}, status=status.HTTP_400_BAD_REQUEST)
 
+        room = None
+        hotel = None
+        if room_id:
+            try:
+                room = Room.objects.get(id=room_id)
+            except Room.DoesNotExist:
+                return Response({"detail": "Room not found."}, status=status.HTTP_404_NOT_FOUND)
+            hotel = room.hotel
+        else:
+            # Look up hotel by hotel_code
+            hotel_code = request.query_params.get('hotel_code') or request.data.get('hotel_code')
+            if not hotel_code:
+                return Response({"detail": "hotel_code query parameter is required when creating booking by room_type."}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                hotel = Hotel.objects.filter(Q(code__iexact=hotel_code) | Q(name__iexact=hotel_code)).first()
+            except Hotel.DoesNotExist:
+                return Response({"detail": "Hotel not found."}, status=status.HTTP_404_NOT_FOUND)
+            if not hotel:
+                return Response({"detail": "Hotel not found."}, status=status.HTTP_404_NOT_FOUND)
+
+            # Find an available room of this type
+            rooms_of_type = Room.objects.filter(hotel=hotel, room_type__name=room_type_name)
+            for r in rooms_of_type:
+                overlaps = Booking.objects.filter(
+                    room=r,
+                    check_in__lt=check_out_date,
+                    check_out__gt=check_in_date
+                ).exclude(status='Checked_out')
+                if not overlaps.exists():
+                    room = r
+                    break
+            
+            if not room:
+                return Response({"detail": f"No rooms of type '{room_type_name}' are available for the selected dates."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check authorization
+        is_owner = hotel.owner == user
+        is_manager = hotel.managers.filter(id=user.id).exists()
+        is_customer = hasattr(user, 'customer_profile')
+
+        if not (is_owner or is_manager or is_customer):
+            return Response({"detail": "Not authorized for this hotel."}, status=status.HTTP_403_FORBIDDEN)
+
         # Validate advance paid
-        room_type_name = room.room_type.name
+        room_type_name_actual = room.room_type.name
         min_advance = 0.00
-        if room_type_name == 'Standard':
+        if room_type_name_actual == 'Standard':
             min_advance = 500.00
-        elif room_type_name == 'Deluxe':
+        elif room_type_name_actual == 'Deluxe':
             min_advance = 1000.00
-        elif room_type_name == 'Superior':
+        elif room_type_name_actual == 'Superior':
             min_advance = 2000.00
 
         try:
@@ -285,39 +336,47 @@ def my_hotel_bookings(request):
             advance_paid_dec = 0.00
         else:
             if advance_paid_dec < min_advance:
-                return Response({"detail": f"Minimum advance payment of ₹{min_advance} is required for {room_type_name} rooms."}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"detail": f"Minimum advance payment of ₹{min_advance} is required for {room_type_name_actual} rooms."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Check for booking overlaps
-        overlapping_bookings = Booking.objects.filter(
-            room=room,
-            check_in__lt=check_out_date,
-            check_out__gt=check_in_date
-        ).exclude(status='Checked_out')
-        if overlapping_bookings.exists():
-            return Response({"detail": "This room is already booked for the selected dates."}, status=status.HTTP_400_BAD_REQUEST)
+        # Check for booking overlaps (only if room was specifically requested)
+        if room_id:
+            overlapping_bookings = Booking.objects.filter(
+                room=room,
+                check_in__lt=check_out_date,
+                check_out__gt=check_in_date
+            ).exclude(status='Checked_out')
+            if overlapping_bookings.exists():
+                return Response({"detail": "This room is already booked for the selected dates."}, status=status.HTTP_400_BAD_REQUEST)
 
         # Get or create customer and user
         from .models import Customer
-        customer = Customer.objects.filter(phone=guest_phone).first()
+        customer = None
+        if guest_email:
+            customer = Customer.objects.filter(user__username=guest_email).first()
         if not customer:
-            username = guest_phone
+            customer = Customer.objects.filter(phone=guest_phone).first()
+
+        if not customer:
+            username = guest_email if guest_email else f"{guest_phone}@hotel.com"
             user_record = User.objects.filter(username=username).first()
             if not user_record:
                 user_record = User.objects.create_user(
                     username=username,
-                    password=guest_phone + '123',
+                    password=username,
                     first_name=guest_first_name,
                     last_name=guest_last_name,
-                    email=guest_email if guest_email else ''
+                    email=username
                 )
-            customer = Customer.objects.create(
-                user=user_record,
-                phone=guest_phone,
-                kyc_type=request.data.get('kyc_type'),
-                kyc_number=request.data.get('kyc_number'),
-                kyc_front=request.FILES.get('kyc_front'),
-                kyc_back=request.FILES.get('kyc_back'),
-            )
+            customer = Customer.objects.filter(user=user_record).first()
+            if not customer:
+                customer = Customer.objects.create(
+                    user=user_record,
+                    phone=guest_phone,
+                    kyc_type=request.data.get('kyc_type'),
+                    kyc_number=request.data.get('kyc_number'),
+                    kyc_front=request.FILES.get('kyc_front'),
+                    kyc_back=request.FILES.get('kyc_back'),
+                )
         else:
             # Update existing customer/user fields if supplied
             kyc_type = request.data.get('kyc_type')
@@ -485,22 +544,28 @@ def my_hotel_booking_detail(request, pk):
             from .models import Customer
             customer = booking.customer
             if not customer:
-                customer = Customer.objects.filter(phone=booking.guest_phone).first()
+                if booking.guest_email:
+                    customer = Customer.objects.filter(user__username=booking.guest_email).first()
                 if not customer:
-                    username = booking.guest_phone
+                    customer = Customer.objects.filter(phone=booking.guest_phone).first()
+                
+                if not customer:
+                    username = booking.guest_email if booking.guest_email else f"{booking.guest_phone}@hotel.com"
                     user_record = User.objects.filter(username=username).first()
                     if not user_record:
                         user_record = User.objects.create_user(
                             username=username,
-                            password=booking.guest_phone + '123',
+                            password=username,
                             first_name=booking.guest_first_name,
                             last_name=booking.guest_last_name,
-                            email=booking.guest_email if booking.guest_email else ''
+                            email=username
                         )
-                    customer = Customer.objects.create(
-                        user=user_record,
-                        phone=booking.guest_phone
-                    )
+                    customer = Customer.objects.filter(user=user_record).first()
+                    if not customer:
+                        customer = Customer.objects.create(
+                            user=user_record,
+                            phone=booking.guest_phone
+                        )
                 booking.customer = customer
 
             if customer:
