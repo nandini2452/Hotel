@@ -1569,7 +1569,7 @@ function App() {
                     {!isEditMode && newBooking.advance_status === 'Paid' && (
                       <>
                         <div className="form-group">
-                          <label className="form-label">Advance Payment Method</label>
+                          <label className="form-label">Payment Method</label>
                           <select
                             className="input-control"
                             value={newBooking.payment_method}
@@ -1582,7 +1582,7 @@ function App() {
                           </select>
                         </div>
                         <div className="form-group">
-                          <label className="form-label">Advance Receipt ID (Optional)</label>
+                          <label className="form-label">Receipt ID (Optional)</label>
                           <input
                             type="text"
                             className="input-control"

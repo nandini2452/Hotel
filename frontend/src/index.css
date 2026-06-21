@@ -773,6 +773,12 @@ select.input-control-small {
   margin-bottom: 1.5rem;
 }
 
+.form-grid .form-group {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
 .col-span-2 {
   grid-column: span 2;
 }
