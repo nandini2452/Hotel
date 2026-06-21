@@ -135,28 +135,20 @@ function App() {
       const tomorrow = new Date();
       tomorrow.setDate(today.getDate() + 1);
       
-      let firstName = '';
-      let lastName = '';
-      let phone = '';
-      if (bookings && bookings.length > 0) {
-        const latest = bookings[0];
-        firstName = latest.guest_first_name || '';
-        lastName = latest.guest_last_name || '';
-        phone = latest.guest_phone || '';
-      }
-      
       setNewBooking(prev => ({
         ...prev,
         guest_email: loggedInUser,
-        guest_first_name: prev.guest_first_name || firstName,
-        guest_last_name: prev.guest_last_name || lastName,
-        guest_phone: prev.guest_phone || phone,
+        guest_first_name: prev.guest_first_name || '',
+        guest_last_name: prev.guest_last_name || '',
+        guest_phone: prev.guest_phone || '',
         room_type: prev.room_type || 'Standard',
         check_in: formatDate(today),
-        check_out: formatDate(tomorrow)
+        check_out: formatDate(tomorrow),
+        advance_paid: prev.advance_paid || '',
+        advance_status: 'Unpaid'
       }));
     }
-  }, [token, userRole, loggedInUser, bookings]);
+  }, [token, userRole, loggedInUser]);
 
   // Helper: formats date to YYYY-MM-DD
   const formatDate = (date) => {
@@ -1060,8 +1052,11 @@ function App() {
     
     const metadata = ROOM_TYPE_METADATA[newBooking.room_type || 'Standard'];
     const advancePaidNum = parseFloat(newBooking.advance_paid) || 0;
-    if (newBooking.advance_status === 'Paid') {
-      if (isNaN(advancePaidNum) || advancePaidNum < metadata.minAdvance) {
+    const isPaying = advancePaidNum > 0;
+    const actualAdvanceStatus = isPaying ? 'Paid' : 'Unpaid';
+    
+    if (isPaying) {
+      if (advancePaidNum < metadata.minAdvance) {
         triggerToast(`Minimum required advance is ₹${metadata.minAdvance} for ${newBooking.room_type} rooms.`);
         return;
       }
@@ -1076,8 +1071,8 @@ function App() {
     formData.append('check_in', newBooking.check_in);
     formData.append('check_out', newBooking.check_out);
     formData.append('status', 'Booked');
-    formData.append('advance_paid', newBooking.advance_status === 'Unpaid' ? 0.00 : advancePaidNum);
-    formData.append('advance_status', newBooking.advance_status);
+    formData.append('advance_paid', isPaying ? advancePaidNum : 0.00);
+    formData.append('advance_status', actualAdvanceStatus);
     formData.append('payment_method', newBooking.payment_method);
     formData.append('receipt_id', newBooking.receipt_id || '');
     
@@ -1112,7 +1107,7 @@ function App() {
       .then(data => {
         triggerToast('Reservation created successfully!');
         
-        if (newBooking.advance_status === 'Paid' && advancePaidNum > 0) {
+        if (isPaying && advancePaidNum > 0) {
           const receipt = {
             type: 'payment',
             guestName: `${data.guest_first_name} ${data.guest_last_name}`,
@@ -1136,8 +1131,8 @@ function App() {
           check_out: getTomorrowStr(),
           check_out_time: '11:30 AM',
           status: 'Booked',
-          advance_paid: 0,
-          advance_status: 'Paid',
+          advance_paid: '',
+          advance_status: 'Unpaid',
           payment_method: 'Cash',
           receipt_id: '',
           room_type: 'Standard',
@@ -1508,8 +1503,7 @@ function App() {
                         const type = e.target.value;
                         setNewBooking(prev => ({
                           ...prev,
-                          room_type: type,
-                          advance_paid: prev.advance_status === 'Paid' ? ROOM_TYPE_METADATA[type].minAdvance : 0
+                          room_type: type
                         }));
                       }}
                       style={{ background: 'rgba(15, 23, 42, 0.85)', color: '#fff' }}
@@ -1678,68 +1672,44 @@ function App() {
                   </div>
 
                   <div style={{ borderTop: '1px dashed rgba(255,255,255,0.05)', paddingTop: '10px', marginTop: '4px' }}>
-                    <label className="form-label" style={{ fontWeight: 'bold', fontSize: '0.8rem', color: 'var(--primary)', marginBottom: '8px', display: 'block' }}>💳 Advance Payment Status</label>
+                    <label className="form-label" style={{ fontWeight: 'bold', fontSize: '0.8rem', color: 'var(--primary)', marginBottom: '8px', display: 'block' }}>💳 Advance Payment (Optional)</label>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: '10px' }}>
-                      <div className="form-group">
-                        <label className="form-label">Advance Status</label>
-                        <select
-                          className="input-control"
-                          value={newBooking.advance_status}
-                          onChange={e => {
-                            const status = e.target.value;
-                            setNewBooking(prev => ({
-                              ...prev,
-                              advance_status: status,
-                              advance_paid: status === 'Unpaid' ? 0 : ROOM_TYPE_METADATA[prev.room_type || 'Standard'].minAdvance
-                            }));
-                          }}
-                          style={{ background: 'rgba(15, 23, 42, 0.85)', color: '#fff' }}
-                        >
-                          <option value="Paid">Paid</option>
-                          <option value="Unpaid">Unpaid</option>
-                        </select>
-                      </div>
-                      <div className="form-group">
-                        <label className="form-label">Advance Amount (₹)</label>
+                      <div className="form-group col-span-2">
+                        <label className="form-label">Advance Paid (₹)</label>
                         <input
                           type="number"
                           className="input-control"
-                          required
-                          disabled={newBooking.advance_status === 'Unpaid'}
-                          min={newBooking.advance_status === 'Paid' ? ROOM_TYPE_METADATA[newBooking.room_type || 'Standard'].minAdvance : 0}
-                          value={newBooking.advance_status === 'Unpaid' ? 0 : newBooking.advance_paid}
+                          placeholder="Leave empty if not paying advance"
+                          value={newBooking.advance_paid}
                           onChange={e => setNewBooking(prev => ({ ...prev, advance_paid: e.target.value }))}
-                          style={newBooking.advance_status === 'Unpaid' ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                         />
                       </div>
                     </div>
-                    {newBooking.advance_status === 'Paid' && (
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: '10px', marginTop: '8px' }}>
-                        <div className="form-group">
-                          <label className="form-label">Payment Method</label>
-                          <select
-                            className="input-control"
-                            value={newBooking.payment_method}
-                            onChange={e => setNewBooking(prev => ({ ...prev, payment_method: e.target.value }))}
-                            style={{ background: 'rgba(15, 23, 42, 0.85)', color: '#fff' }}
-                          >
-                            <option value="Cash">Cash</option>
-                            <option value="UPI">UPI</option>
-                            <option value="Card">Card</option>
-                          </select>
-                        </div>
-                        <div className="form-group">
-                          <label className="form-label">Receipt ID (Optional)</label>
-                          <input
-                            type="text"
-                            className="input-control"
-                            placeholder="Receipt ID"
-                            value={newBooking.receipt_id}
-                            onChange={e => setNewBooking(prev => ({ ...prev, receipt_id: e.target.value }))}
-                          />
-                        </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: '10px', marginTop: '8px' }}>
+                      <div className="form-group">
+                        <label className="form-label">Payment Method</label>
+                        <select
+                          className="input-control"
+                          value={newBooking.payment_method}
+                          onChange={e => setNewBooking(prev => ({ ...prev, payment_method: e.target.value }))}
+                          style={{ background: 'rgba(15, 23, 42, 0.85)', color: '#fff' }}
+                        >
+                          <option value="Cash">Cash</option>
+                          <option value="UPI">UPI</option>
+                          <option value="Card">Card</option>
+                        </select>
                       </div>
-                    )}
+                      <div className="form-group">
+                        <label className="form-label">Receipt ID (Optional)</label>
+                        <input
+                          type="text"
+                          className="input-control"
+                          placeholder="Receipt ID"
+                          value={newBooking.receipt_id}
+                          onChange={e => setNewBooking(prev => ({ ...prev, receipt_id: e.target.value }))}
+                        />
+                      </div>
+                    </div>
                   </div>
 
                   <button type="submit" className="btn-submit" disabled={loading} style={{ marginTop: '8px' }}>
