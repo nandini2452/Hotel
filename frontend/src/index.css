@@ -42,12 +42,12 @@ body {
 /* Auth Container */
 .auth-wrapper {
   width: 100%;
-  max-width: 880px;
+  max-width: 1200px;
   background: var(--card-bg);
   border: 1px solid var(--card-border);
   backdrop-filter: blur(20px);
   border-radius: 24px;
-  padding: 5rem 4.5rem;
+  padding: 6.5rem 5.5rem;
   box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
   animation: fadeIn 0.6s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -64,17 +64,17 @@ body {
 }
 
 .form-group {
-  margin-bottom: 2rem;
+  margin-bottom: 2.5rem;
 }
 
 .form-label {
   display: block;
-  font-size: 1.2rem;
+  font-size: 1.5rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-secondary);
-  margin-bottom: 0.85rem;
+  margin-bottom: 1.1rem;
 }
 
 .input-control {
@@ -82,11 +82,11 @@ body {
   background: rgba(15, 23, 42, 0.8);
   border: 1px solid var(--card-border);
   border-radius: 12px;
-  padding: 1.1rem 1.4rem;
-  height: 64px;
+  padding: 1.3rem 1.6rem;
+  height: 76px;
   color: var(--text-primary);
   font-family: var(--font-body);
-  font-size: 1.25rem;
+  font-size: 1.5rem;
   transition: all 0.25s ease;
 }
 
@@ -217,11 +217,11 @@ select.input-control-small {
   width: 100%;
   background: linear-gradient(135deg, var(--primary), #6366f1);
   border: none;
-  border-radius: 12px;
-  padding: 1.35rem;
+  border-radius: 16px;
+  padding: 1.65rem;
   color: var(--text-primary);
   font-family: var(--font-title);
-  font-size: 1.4rem;
+  font-size: 1.7rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
