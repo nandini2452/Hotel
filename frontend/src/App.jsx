@@ -11,6 +11,20 @@ const ROOM_TYPE_METADATA = {
   Superior: { price: 4000, minAdvance: 2000 }
 };
 
+const formatDateHelper = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const getTodayStr = () => formatDateHelper(new Date());
+const getTomorrowStr = () => {
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  return formatDateHelper(tomorrow);
+};
+
 function App() {
   const [hotelCodeInput, setHotelCodeInput] = useState('');
   const [username, setUsername] = useState('');
@@ -40,16 +54,20 @@ function App() {
     guest_last_name: '',
     guest_phone: '',
     guest_email: '',
-    check_in: '',
+    check_in: getTodayStr(),
     check_in_time: '11:30 AM',
-    check_out: '',
+    check_out: getTomorrowStr(),
     check_out_time: '11:30 AM',
     status: 'Booked',
     advance_paid: 0,
     advance_status: 'Paid',
     payment_method: 'Cash',
     receipt_id: '',
-    room_type: 'Standard'
+    room_type: 'Standard',
+    kyc_type: 'Aadhaar',
+    kyc_number: '',
+    kyc_front: null,
+    kyc_back: null
   });
 
   const [startDate, setStartDate] = useState(new Date());
@@ -113,13 +131,32 @@ function App() {
   // Pre-fill customer details if logged in as customer
   useEffect(() => {
     if (token && userRole === 'customer') {
+      const today = new Date();
+      const tomorrow = new Date();
+      tomorrow.setDate(today.getDate() + 1);
+      
+      let firstName = '';
+      let lastName = '';
+      let phone = '';
+      if (bookings && bookings.length > 0) {
+        const latest = bookings[0];
+        firstName = latest.guest_first_name || '';
+        lastName = latest.guest_last_name || '';
+        phone = latest.guest_phone || '';
+      }
+      
       setNewBooking(prev => ({
         ...prev,
         guest_email: loggedInUser,
-        room_type: 'Standard'
+        guest_first_name: prev.guest_first_name || firstName,
+        guest_last_name: prev.guest_last_name || lastName,
+        guest_phone: prev.guest_phone || phone,
+        room_type: prev.room_type || 'Standard',
+        check_in: formatDate(today),
+        check_out: formatDate(tomorrow)
       }));
     }
-  }, [token, userRole, loggedInUser]);
+  }, [token, userRole, loggedInUser, bookings]);
 
   // Helper: formats date to YYYY-MM-DD
   const formatDate = (date) => {
@@ -278,6 +315,26 @@ function App() {
     setHotelCodeInput('');
     setRooms([]);
     setBookings([]);
+    setNewBooking({
+      guest_first_name: '',
+      guest_last_name: '',
+      guest_phone: '',
+      guest_email: '',
+      check_in: getTodayStr(),
+      check_in_time: '11:30 AM',
+      check_out: getTomorrowStr(),
+      check_out_time: '11:30 AM',
+      status: 'Booked',
+      advance_paid: 0,
+      advance_status: 'Paid',
+      payment_method: 'Cash',
+      receipt_id: '',
+      room_type: 'Standard',
+      kyc_type: 'Aadhaar',
+      kyc_number: '',
+      kyc_front: null,
+      kyc_back: null
+    });
   };
 
   // Modal actions
@@ -1074,9 +1131,9 @@ function App() {
           guest_last_name: '',
           guest_phone: '',
           guest_email: loggedInUser,
-          check_in: '',
+          check_in: getTodayStr(),
           check_in_time: '11:30 AM',
-          check_out: '',
+          check_out: getTomorrowStr(),
           check_out_time: '11:30 AM',
           status: 'Booked',
           advance_paid: 0,
