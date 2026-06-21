@@ -793,6 +793,25 @@ function App() {
       return;
     }
 
+    // Validate KYC Document number format
+    if (newBooking.kyc_number) {
+      const type = newBooking.kyc_type || 'Aadhaar';
+      const num = newBooking.kyc_number;
+      if (type === 'Aadhaar') {
+        const aadhaarRegex = /^\d{12}$/;
+        if (!aadhaarRegex.test(num)) {
+          triggerToast('Aadhaar number must be exactly 12 digits.');
+          return;
+        }
+      } else if (type === 'PAN') {
+        const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
+        if (!panRegex.test(num)) {
+          triggerToast('PAN Card number must be 10 characters in the format: 5 letters, 4 digits, 1 letter (e.g. ABCDE1234F).');
+          return;
+        }
+      }
+    }
+
     const url = isEditMode 
       ? `http://127.0.0.1:8000/api/my-hotel/bookings/${editingBookingId}/` 
       : 'http://127.0.0.1:8000/api/my-hotel/bookings/';
@@ -1602,7 +1621,10 @@ function App() {
                           <select
                             className="input-control"
                             value={newBooking.kyc_type || 'Aadhaar'}
-                            onChange={e => setNewBooking(prev => ({ ...prev, kyc_type: e.target.value }))}
+                            onChange={e => {
+                              const type = e.target.value;
+                              setNewBooking(prev => ({ ...prev, kyc_type: type, kyc_number: '' }));
+                            }}
                             style={{ background: 'rgba(15, 23, 42, 0.85)', color: '#fff' }}
                           >
                             <option value="Aadhaar">Aadhaar</option>
@@ -1614,9 +1636,19 @@ function App() {
                           <input
                             type="text"
                             className="input-control"
-                            placeholder="Enter Document Number"
+                            placeholder={newBooking.kyc_type === 'PAN' ? 'Enter 10-char PAN (ABCDE1234F)' : 'Enter 12-digit Aadhaar'}
+                            maxLength={newBooking.kyc_type === 'PAN' ? 10 : 12}
                             value={newBooking.kyc_number || ''}
-                            onChange={e => setNewBooking(prev => ({ ...prev, kyc_number: e.target.value }))}
+                            onChange={e => {
+                              let val = e.target.value;
+                              const currentType = newBooking.kyc_type || 'Aadhaar';
+                              if (currentType === 'Aadhaar') {
+                                val = val.replace(/\D/g, '').slice(0, 12);
+                              } else {
+                                val = val.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 10);
+                              }
+                              setNewBooking(prev => ({ ...prev, kyc_number: val }));
+                            }}
                           />
                         </div>
                       </div>
