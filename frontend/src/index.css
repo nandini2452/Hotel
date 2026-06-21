@@ -64,17 +64,17 @@ body {
 }
 
 .form-group {
-  margin-bottom: 3rem;
+  margin-bottom: 1.25rem;
 }
 
 .form-label {
   display: block;
-  font-size: 1.8rem;
+  font-size: 0.85rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-secondary);
-  margin-bottom: 1.3rem;
+  margin-bottom: 0.5rem;
 }
 
 .input-control {
@@ -82,12 +82,28 @@ body {
   background: rgba(15, 23, 42, 0.8);
   border: 1px solid var(--card-border);
   border-radius: 12px;
-  padding: 1.5rem 1.8rem;
-  height: 90px;
+  padding: 0.85rem 1rem;
+  height: 48px;
   color: var(--text-primary);
   font-family: var(--font-body);
-  font-size: 1.8rem;
+  font-size: 0.95rem;
   transition: all 0.25s ease;
+}
+
+/* Auth Specific Larger Styling to avoid styling leaks */
+.auth-wrapper .form-group {
+  margin-bottom: 3rem;
+}
+
+.auth-wrapper .form-label {
+  font-size: 1.8rem;
+  margin-bottom: 1.3rem;
+}
+
+.auth-wrapper .input-control {
+  height: 90px;
+  font-size: 1.8rem;
+  padding: 1.5rem 1.8rem;
 }
 
 select.input-control {
@@ -217,15 +233,21 @@ select.input-control-small {
   width: 100%;
   background: linear-gradient(135deg, var(--primary), #6366f1);
   border: none;
-  border-radius: 20px;
-  padding: 2rem;
+  border-radius: 12px;
+  padding: 0.95rem;
   color: var(--text-primary);
   font-family: var(--font-title);
-  font-size: 2.1rem;
+  font-size: 1rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
   box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+}
+
+.auth-wrapper .btn-submit {
+  border-radius: 20px;
+  padding: 2rem;
+  font-size: 2.1rem;
 }
 
 .btn-submit:hover {
