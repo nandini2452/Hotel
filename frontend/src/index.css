@@ -357,9 +357,9 @@ select.input-control-small {
 /* Dashboard container & layout */
 .dashboard-container {
   width: 100%;
-  max-width: 1600px;
+  max-width: 1500px;
   margin: 0 auto;
-  padding: 1.5rem;
+  padding: 0.75rem 1.25rem;
   animation: fadeIn 0.8s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -367,7 +367,7 @@ select.input-control-small {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 2rem;
+  margin-bottom: 1rem;
 }
 
 .hotel-title-section {
@@ -377,17 +377,17 @@ select.input-control-small {
 
 .hotel-title-section h1 {
   font-family: var(--font-title);
-  font-size: 2.8rem;
+  font-size: 2.0rem;
   font-weight: 700;
   background: linear-gradient(135deg, #f8fafc, #cbd5e1, #a78bfa, #818cf8);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
-  margin-bottom: 0.35rem;
+  margin-bottom: 0.15rem;
 }
 
 .hotel-title-section p {
   color: var(--text-secondary);
-  font-size: 1.1rem;
+  font-size: 0.9rem;
 }
 
 /* Sign out button at top-left */
@@ -416,27 +416,27 @@ select.input-control-small {
   border: 1px solid var(--card-border);
   backdrop-filter: blur(20px);
   border-radius: 20px;
-  padding: 2rem;
+  padding: 1rem;
   box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3);
-  margin-top: 1rem;
+  margin-top: 0.5rem;
 }
 
 .calendar-header-actions {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 1.5rem;
+  margin-bottom: 1rem;
 }
 
 .calendar-header-actions h2 {
   font-family: var(--font-title);
-  font-size: 1.6rem;
+  font-size: 1.25rem;
   color: var(--text-primary);
 }
 
 .calendar-legend {
   display: flex;
-  gap: 1.2rem;
+  gap: 1rem;
   flex-wrap: wrap;
 }
 
@@ -444,7 +444,7 @@ select.input-control-small {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  font-size: 0.9rem;
+  font-size: 0.8rem;
   color: var(--text-secondary);
 }
 
@@ -482,14 +482,14 @@ select.input-control-small {
 .calendar-table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 1400px;
+  min-width: 1300px;
   text-align: left;
 }
 
 .calendar-table th, .calendar-table td {
   border: 1px solid rgba(255, 255, 255, 0.04);
   padding: 0;
-  height: 68px;
+  height: 50px;
   vertical-align: middle;
 }
 
@@ -499,9 +499,9 @@ select.input-control-small {
 }
 
 .category-title {
-  padding: 1rem 1.25rem !important;
+  padding: 0.5rem 0.75rem !important;
   font-family: var(--font-title);
-  font-size: 1.0rem;
+  font-size: 0.85rem;
   font-weight: 700;
   color: #a78bfa;
   text-transform: uppercase;
@@ -511,15 +511,15 @@ select.input-control-small {
 
 /* Room Column */
 .room-column-header {
-  width: 180px;
-  min-width: 180px;
+  width: 140px;
+  min-width: 140px;
   background: rgba(15, 23, 42, 0.95);
   padding: 0.5rem 1rem !important;
   font-family: var(--font-title);
   font-weight: 600;
-  font-size: 0.95rem;
+  font-size: 0.85rem;
   color: var(--text-secondary);
-  height: 68px !important;
+  height: 50px !important;
   position: sticky;
   left: 0;
   z-index: 10;
@@ -529,7 +529,7 @@ select.input-control-small {
   background: rgba(15, 23, 42, 0.95);
   font-family: var(--font-title);
   font-weight: 600;
-  font-size: 1.05rem;
+  font-size: 0.9rem;
   color: var(--text-primary);
   padding: 0 1rem !important;
   position: sticky;
@@ -540,7 +540,7 @@ select.input-control-small {
 
 .room-type-badge {
   display: block;
-  font-size: 0.8rem;
+  font-size: 0.7rem;
   color: var(--text-secondary);
   font-weight: normal;
   margin-top: 2px;
@@ -550,13 +550,13 @@ select.input-control-small {
 .date-column-header {
   padding: 0.5rem 0.25rem !important;
   text-align: center;
-  height: 68px !important;
-  min-width: 90px;
+  height: 50px !important;
+  min-width: 75px;
   font-family: var(--font-title);
 }
 
 .date-day {
-  font-size: 0.8rem;
+  font-size: 0.7rem;
   text-transform: uppercase;
   color: var(--text-secondary);
   display: block;
@@ -564,7 +564,7 @@ select.input-control-small {
 }
 
 .date-num {
-  font-size: 1.15rem;
+  font-size: 1rem;
   font-weight: 700;
   color: var(--text-primary);
 }
@@ -597,7 +597,7 @@ select.input-control-small {
   width: 100%;
   height: 100%;
   color: transparent;
-  font-size: 1.8rem;
+  font-size: 1.4rem;
   font-weight: 300;
   transition: color 0.25s ease;
 }
@@ -609,7 +609,7 @@ select.input-control-small {
 /* Booking Span cells */
 .booking-cell {
   cursor: pointer;
-  padding: 4px !important;
+  padding: 2px !important;
   transition: transform 0.2s ease, filter 0.2s ease;
 }
 
@@ -621,9 +621,9 @@ select.input-control-small {
 .booking-info-block {
   width: 100%;
   height: 100%;
-  min-height: 56px;
-  border-radius: 8px;
-  padding: 6px 10px;
+  min-height: 38px;
+  border-radius: 6px;
+  padding: 3px 6px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -632,7 +632,7 @@ select.input-control-small {
 
 .booking-guest-name {
   font-family: var(--font-title);
-  font-size: 0.85rem;
+  font-size: 0.75rem;
   font-weight: 600;
   color: #ffffff;
   overflow: hidden;
@@ -641,7 +641,7 @@ select.input-control-small {
 }
 
 .booking-badge {
-  font-size: 0.7rem;
+  font-size: 0.6rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.02em;
