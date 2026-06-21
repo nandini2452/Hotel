@@ -768,6 +768,7 @@ def my_hotel_booking_detail(request, pk):
 
     elif request.method == 'DELETE':
         reason = request.query_params.get('reason') or request.data.get('reason') or ''
+        action = request.query_params.get('action') or request.data.get('action') or ''
         if is_booking_customer:
             if booking.status != 'Booked':
                 return Response({"detail": "Cannot cancel a reservation that has already checked in or checked out."}, status=status.HTTP_400_BAD_REQUEST)
@@ -777,8 +778,14 @@ def my_hotel_booking_detail(request, pk):
             booking.save()
             return Response({"detail": "Booking cancelled successfully."}, status=status.HTTP_200_OK)
         else:
-            booking.status = 'Rejected'
-            booking.rejection_reason = reason if reason else 'No reason specified'
+            if action == 'cancel':
+                booking.status = 'Cancelled'
+                default_reason = 'Cancelled by manager'
+            else:
+                booking.status = 'Rejected'
+                default_reason = 'No reason specified'
+            
+            booking.rejection_reason = reason if reason else default_reason
             
             refund_val = request.query_params.get('refund') or request.data.get('refund')
             if refund_val:
@@ -798,7 +805,8 @@ def my_hotel_booking_detail(request, pk):
                     pass
             
             booking.save()
-            return Response({"detail": "Booking rejected successfully."}, status=status.HTTP_200_OK)
+            detail_msg = "Booking cancelled successfully." if booking.status == 'Cancelled' else "Booking rejected successfully."
+            return Response({"detail": detail_msg}, status=status.HTTP_200_OK)
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])

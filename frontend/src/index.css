@@ -42,12 +42,12 @@ body {
 /* Auth Container */
 .auth-wrapper {
   width: 100%;
-  max-width: 1600px;
+  max-width: 480px;
   background: var(--card-bg);
   border: 1px solid var(--card-border);
   backdrop-filter: blur(20px);
   border-radius: 24px;
-  padding: 8rem 7rem;
+  padding: 2.5rem;
   box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
   animation: fadeIn 0.6s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -90,21 +90,7 @@ body {
   transition: all 0.25s ease;
 }
 
-/* Auth Specific Larger Styling to avoid styling leaks */
-.auth-wrapper .form-group {
-  margin-bottom: 3rem;
-}
 
-.auth-wrapper .form-label {
-  font-size: 1.8rem;
-  margin-bottom: 1.3rem;
-}
-
-.auth-wrapper .input-control {
-  height: 90px;
-  font-size: 1.8rem;
-  padding: 1.5rem 1.8rem;
-}
 
 select.input-control {
   appearance: none;
@@ -244,11 +230,6 @@ select.input-control-small {
   box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
 }
 
-.auth-wrapper .btn-submit {
-  border-radius: 20px;
-  padding: 2rem;
-  font-size: 2.1rem;
-}
 
 .btn-submit:hover {
   transform: translateY(-1px);
@@ -1252,5 +1233,243 @@ select.input-control-small {
 .btn-approve-request:hover {
   background: linear-gradient(135deg, #34d399, #059669);
   transform: translateY(-1px);
+}
+
+/* --- Viewport Height constraints (Fit to One Screen Layout) --- */
+body.dashboard-mode {
+  height: 100vh;
+  min-height: 100vh;
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+}
+
+body.dashboard-mode #root {
+  height: 100vh;
+  min-height: 100vh;
+  width: 100%;
+  padding: 0.75rem 1.25rem;
+  box-sizing: border-box;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: stretch;
+}
+
+/* Dashboard container takes full remaining height */
+body.dashboard-mode .dashboard-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  width: 100%;
+  max-width: 1500px;
+  margin: 0 auto;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+/* Header and Navigation items do not shrink */
+body.dashboard-mode .dashboard-header {
+  flex-shrink: 0;
+  margin-bottom: 0.5rem;
+}
+
+body.dashboard-mode .manager-dashboard-nav {
+  flex-shrink: 0;
+  margin-bottom: 0.5rem !important;
+}
+
+/* Manager Dashboard Content Layout */
+body.dashboard-mode .manager-dashboard-layout {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: hidden;
+}
+
+/* Alerts and Requests placed side-by-side */
+body.dashboard-mode .alerts-row-wrapper {
+  display: flex;
+  gap: 12px;
+  flex-shrink: 0;
+  width: 100%;
+}
+
+body.dashboard-mode .alerts-row-wrapper > div {
+  flex: 1;
+  margin-bottom: 0 !important;
+}
+
+body.dashboard-mode .alerts-list {
+  max-height: 110px;
+  overflow-y: auto;
+}
+
+/* Pending Refund Approvals container */
+.pending-refunds-container {
+  background: rgba(245, 158, 11, 0.05);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  border-radius: 16px;
+  padding: 1.25rem;
+  margin-bottom: 1.5rem;
+  animation: slideInDown 0.3s ease-out;
+}
+
+.pending-refunds-container h3 {
+  font-family: var(--font-title);
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #fbbf24;
+  margin: 0;
+}
+
+/* Main scheduler calendar/transactions card takes remaining height */
+body.dashboard-mode .dashboard-container .calendar-card {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin-top: 0 !important;
+  padding: 1rem !important;
+  overflow: hidden;
+}
+
+/* Calendar Scheduler Grid Scroll */
+body.dashboard-mode .calendar-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto !important; /* enable both directions */
+  border-radius: 8px;
+}
+
+/* Sticky Headers & Sticky Room details for Calendar table */
+body.dashboard-mode .calendar-table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+body.dashboard-mode .calendar-table thead th {
+  position: sticky;
+  top: 0;
+  background: #0b1329; /* Matches background */
+  z-index: 20;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+body.dashboard-mode .calendar-table thead th.room-column-header {
+  z-index: 30;
+  left: 0;
+  top: 0;
+  background: #0f172a;
+}
+
+body.dashboard-mode .calendar-table tbody td.room-cell {
+  position: sticky;
+  left: 0;
+  z-index: 10;
+  background: #0f172a;
+  box-shadow: 2px 0 5px rgba(0, 0, 0, 0.25);
+}
+
+body.dashboard-mode .category-title {
+  position: sticky;
+  left: 0;
+  background: #0f172a;
+  z-index: 5;
+}
+
+/* Sticky headers and scrolling for Transactions List Table */
+body.dashboard-mode .table-responsive {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto !important;
+}
+
+body.dashboard-mode .table-responsive table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+body.dashboard-mode .table-responsive thead th {
+  position: sticky;
+  top: 0;
+  background: #0b1329; /* solid background */
+  z-index: 10;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+/* Customer Self Service Dashboard Grid Layout */
+body.dashboard-mode .customer-dashboard-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1.2fr 1.8fr;
+  gap: 1.5rem;
+  margin-top: 0 !important;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+body.dashboard-mode .customer-dashboard-grid > .calendar-card {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+body.dashboard-mode .customer-dashboard-grid > .calendar-card > form {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+body.dashboard-mode .customer-dashboard-grid > .calendar-card > div {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+/* Beautiful custom thin scrollbars to save space and look premium */
+body.dashboard-mode *::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+body.dashboard-mode *::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.2);
+  border-radius: 3px;
+}
+
+body.dashboard-mode *::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+
+body.dashboard-mode *::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+@media (max-width: 768px) {
+  body.dashboard-mode {
+    overflow-y: auto;
+    height: auto;
+  }
+  body.dashboard-mode #root {
+    height: auto;
+    overflow: visible;
+  }
+  body.dashboard-mode .customer-dashboard-grid {
+    grid-template-columns: 1fr;
+    height: auto;
+    overflow: visible;
+  }
+  body.dashboard-mode .alerts-row-wrapper {
+    flex-direction: column;
+  }
 }
 

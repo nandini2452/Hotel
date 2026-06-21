@@ -167,4 +167,50 @@ class TransactionReportingTests(APITestCase):
         self.assertEqual(response['Content-Type'], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
         self.assertTrue(len(response.content) > 0)
 
+    def test_manager_cancel_reservation(self):
+        # 1. Create a booking
+        today = datetime.date.today()
+        tomorrow = today + datetime.timedelta(days=1)
+        booking = Booking.objects.create(
+            room=self.room,
+            customer=self.customer_profile,
+            guest_first_name="Jane",
+            guest_last_name="Doe",
+            guest_phone="9999999999",
+            guest_email="customer@example.com",
+            check_in=today,
+            check_out=tomorrow,
+            status="Booked"
+        )
+        # Create a payment transaction for this booking
+        Transaction.objects.create(
+            booking=booking,
+            amount=500.00,
+            payment_method="UPI",
+            receipt_id="REC-CANCEL-TEST"
+        )
+
+        # 2. Cancel reservation as manager (action=cancel)
+        delete_url = f"/api/my-hotel/bookings/{booking.id}/?hotel_code={self.hotel.code}&refund=450.00&method=UPI&reason=Got+a+different+hotel+nearby&action=cancel"
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.manager_token.key}')
+        response = self.client.delete(delete_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['detail'], 'Booking cancelled successfully.')
+
+        # 3. Verify status set to Cancelled
+        booking.refresh_from_db()
+        self.assertEqual(booking.status, 'Cancelled')
+        self.assertEqual(booking.rejection_reason, 'Got a different hotel nearby')
+
+        # 4. Verify refund transaction is logged in DB
+        txns = Transaction.objects.filter(booking=booking).order_by('created_at')
+        self.assertEqual(txns.count(), 2)
+        # first is payment
+        self.assertEqual(txns[0].amount, 500.00)
+        # second is refund
+        self.assertEqual(txns[1].amount, -450.00)
+        self.assertEqual(txns[1].payment_method, 'UPI')
+        self.assertEqual(txns[1].receipt_id, f"REF-{booking.id}")
+
+
 

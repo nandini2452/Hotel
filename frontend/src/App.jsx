@@ -120,6 +120,7 @@ function App() {
 
   // Cancellation & refund modal state
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
+  const [cancelModalMode, setCancelModalMode] = useState('cancel'); // 'cancel' or 'reject'
   const [cancelRefundAmount, setCancelRefundAmount] = useState('');
   const [cancelPaymentMethod, setCancelPaymentMethod] = useState('Cash');
   const [rejectionReason, setRejectionReason] = useState('Rooms not available');
@@ -128,6 +129,8 @@ function App() {
   // Cancellation receipt state
   const [receiptModalOpen, setReceiptModalOpen] = useState(false);
   const [receiptData, setReceiptData] = useState(null);
+  const [customerCancelModalOpen, setCustomerCancelModalOpen] = useState(false);
+  const [customerCancelBooking, setCustomerCancelBooking] = useState(null);
 
   // Customer Payment Quick Record states
   const [customerPaymentBooking, setCustomerPaymentBooking] = useState(null);
@@ -190,6 +193,18 @@ function App() {
       });
     }
   }, [token, userRole, loggedInUser]);
+
+  // Manage body dashboard-mode class
+  useEffect(() => {
+    if (token) {
+      document.body.classList.add('dashboard-mode');
+    } else {
+      document.body.classList.remove('dashboard-mode');
+    }
+    return () => {
+      document.body.classList.remove('dashboard-mode');
+    };
+  }, [token]);
 
   // Helper: formats date to YYYY-MM-DD
   const formatDate = (date) => {
@@ -520,6 +535,17 @@ function App() {
         }
       });
   };
+
+  // Get all bookings that are cancelled or rejected and pending a refund approval
+  const pendingRefundBookings = useMemo(() => {
+    return bookings.filter(b => {
+      const isEndedStatus = b.status === 'Cancelled' || b.status === 'Rejected';
+      const txns = b.transactions || [];
+      const hasRefund = txns.some(t => parseFloat(t.amount) < 0);
+      const hasAdvance = parseFloat(b.advance_paid || 0) > 0;
+      return isEndedStatus && hasAdvance && !hasRefund;
+    });
+  }, [bookings]);
 
   // Aggregate all transactions across all bookings
   const allTransactions = useMemo(() => {
@@ -1084,13 +1110,23 @@ function App() {
     const targetBooking = contextMenu.booking || selectedBooking;
     if (!targetBooking) return;
     
+    const isAlreadyEnded = targetBooking.status === 'Cancelled' || targetBooking.status === 'Rejected';
+    if (isAlreadyEnded) {
+      const confirmApprove = window.confirm(
+        `Approve and release refund of ₹${parseFloat(cancelRefundAmount) || 0} immediately?\n\n` +
+        `• Clicking "OK" will immediately release the refund to the customer.\n` +
+        `• Clicking "Cancel" will leave it to be auto-refunded to their bank account within 24 hours.`
+      );
+      if (!confirmApprove) return;
+    }
+    
     let reasonText = '';
     if (userRole !== 'customer') {
       reasonText = rejectionReason === 'Other' ? customRejectionReason : rejectionReason;
     }
     
     const receipt = {
-      type: 'cancellation',
+      type: cancelModalMode === 'cancel' ? 'cancellation' : 'rejection',
       guestName: `${targetBooking.guest_first_name} ${targetBooking.guest_last_name}`,
       roomNumber: targetBooking.room_number,
       refundAmount: parseFloat(cancelRefundAmount) || 0,
@@ -1099,18 +1135,21 @@ function App() {
       reason: reasonText
     };
     
-    const url = `http://127.0.0.1:8000/api/my-hotel/bookings/${targetBooking.id}/?reason=${encodeURIComponent(reasonText)}&refund=${parseFloat(cancelRefundAmount) || 0}&method=${cancelPaymentMethod}`;
+    const url = `http://127.0.0.1:8000/api/my-hotel/bookings/${targetBooking.id}/?reason=${encodeURIComponent(reasonText)}&refund=${parseFloat(cancelRefundAmount) || 0}&method=${cancelPaymentMethod}&action=${cancelModalMode}`;
     fetch(url, {
       method: 'DELETE',
       headers: { 'Authorization': `Token ${token}` }
     })
-      .then(res => {
-        if (!res.ok) throw new Error('Failed to cancel reservation');
+      .then(async res => {
+        if (!res.ok) {
+          const data = await res.json();
+          throw new Error(data.detail || (cancelModalMode === 'cancel' ? 'Failed to cancel reservation' : 'Failed to reject reservation'));
+        }
         setCancelModalOpen(false);
         setInfoModalOpen(false);
         setReceiptData(receipt);
         setReceiptModalOpen(true);
-        triggerToast('Reservation cancelled successfully.');
+        triggerToast(cancelModalMode === 'cancel' ? 'Reservation cancelled successfully.' : 'Reservation rejected successfully.');
         refreshBookings();
       })
       .catch(err => triggerToast(err.message));
@@ -1576,26 +1615,36 @@ function App() {
       });
   };
 
-  const handleCustomerCancelBooking = (bookingId) => {
-    if (window.confirm("Are you sure you want to cancel this reservation?")) {
-      fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/${bookingId}/`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Token ${token}`
+  const handleCustomerCancelBooking = (booking) => {
+    setCustomerCancelBooking(booking);
+    setCustomerCancelModalOpen(true);
+  };
+
+  const handleCustomerCancelBookingConfirmed = () => {
+    if (!customerCancelBooking) return;
+    const bookingId = customerCancelBooking.id;
+    
+    fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/${bookingId}/`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Token ${token}`
+      }
+    })
+      .then(async res => {
+        if (!res.ok) {
+          const data = await res.json();
+          throw new Error(data.detail || 'Failed to cancel reservation.');
         }
-      })
-        .then(res => {
-          if (!res.ok) throw new Error("Failed to cancel reservation.");
-          triggerToast("Reservation cancelled successfully!");
-          // Refresh bookings
-          fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/?hotel_code=${hotelCode}`, {
-            headers: { 'Authorization': `Token ${token}` }
-          })
-            .then(r => r.json())
-            .then(data => setBookings(data));
+        triggerToast("Reservation cancelled. Your refund will be processed within 24 hours.");
+        setCustomerCancelModalOpen(false);
+        // Refresh bookings
+        fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/?hotel_code=${hotelCode}`, {
+          headers: { 'Authorization': `Token ${token}` }
         })
-        .catch(err => triggerToast(err.message));
-    }
+          .then(r => r.json())
+          .then(data => setBookings(data));
+      })
+      .catch(err => triggerToast(err.message));
   };
 
   const handleCustomerOpenPaymentModal = (booking) => {
@@ -2316,6 +2365,44 @@ function App() {
                               <div style={{ fontSize: '0.75rem', color: parseFloat(b.outstanding_amount) > 0 ? '#fb7185' : '#4ade80' }}>
                                 Outstanding: ₹{parseFloat(b.outstanding_amount).toLocaleString('en-IN')}
                               </div>
+
+                              {/* Transaction list & refund notices for the customer */}
+                              {(() => {
+                                const txns = b.transactions || [];
+                                const hasRefund = txns.some(t => parseFloat(t.amount) < 0);
+                                const hasAdvance = parseFloat(b.advance_paid || 0) > 0;
+                                const isEndedStatus = b.status === 'Cancelled' || b.status === 'Rejected';
+                                
+                                return (
+                                  <>
+                                    {txns.length > 0 && (
+                                      <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px dashed rgba(255,255,255,0.08)' }}>
+                                        <div style={{ fontSize: '0.72rem', fontWeight: 'bold', color: '#94a3b8', marginBottom: '2px' }}>Ledger/Txns:</div>
+                                        {txns.map(t => {
+                                          const amt = parseFloat(t.amount);
+                                          const isRefund = amt < 0;
+                                          return (
+                                            <div key={t.id} style={{ fontSize: '0.7rem', display: 'flex', justifyContent: 'space-between', color: isRefund ? '#fb7185' : '#34d399' }}>
+                                              <span>{isRefund ? '↩️ Refund' : '💳 Paid'} ({t.payment_method})</span>
+                                              <span>{isRefund ? '-' : ''}₹{Math.abs(amt).toLocaleString('en-IN')}</span>
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    )}
+                                    {isEndedStatus && hasAdvance && !hasRefund && (
+                                      <div style={{ fontSize: '0.72rem', color: '#fbbf24', marginTop: '6px', fontWeight: 'bold', padding: '4px', background: 'rgba(245, 158, 11, 0.05)', borderRadius: '4px', border: '1px solid rgba(245, 158, 11, 0.15)' }}>
+                                        ⏳ Refund of ₹{(parseFloat(b.advance_paid) * 0.9).toFixed(2)} will be refunded within 24 hours.
+                                      </div>
+                                    )}
+                                    {isEndedStatus && hasAdvance && hasRefund && (
+                                      <div style={{ fontSize: '0.72rem', color: '#4ade80', marginTop: '6px', fontWeight: 'bold', padding: '4px', background: 'rgba(34, 197, 94, 0.05)', borderRadius: '4px', border: '1px solid rgba(34, 197, 94, 0.15)' }}>
+                                        ✅ Refund Completed
+                                      </div>
+                                    )}
+                                  </>
+                                );
+                              })()}
                             </td>
                             <td>
                               <span style={{
@@ -2405,7 +2492,7 @@ function App() {
                                     type="button"
                                     className="btn-cancel"
                                     style={{ padding: '4px 8px', fontSize: '0.7rem', height: 'auto', background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.3)', borderStyle: 'solid', borderWidth: '1px', borderRadius: '4px', cursor: 'pointer' }}
-                                    onClick={() => handleCustomerCancelBooking(b.id)}
+                                    onClick={() => handleCustomerCancelBooking(b)}
                                   >
                                     ❌ Cancel
                                   </button>
@@ -2425,94 +2512,140 @@ function App() {
               </div>
             </div>
           ) : (
-            <>
-              {/* Guest Booking Requests Panel */}
-              {bookingRequests.length > 0 && (
-                <div className="booking-requests-container">
-                  <div className="alerts-header">
-                    <span className="alerts-icon">📩</span>
-                    <h3>Guest Booking Requests ({bookingRequests.length})</h3>
-                  </div>
-                  <div className="alerts-list">
-                    {bookingRequests.map(b => {
-                      const isPendingKYC = b.kyc && !b.kyc.kyc_verified;
-                      return (
-                        <div key={b.id} className="request-card">
-                          <div className="alert-info">
-                            <span style={{ fontSize: '1.0rem' }}>
-                              Guest: <strong>{b.guest_first_name} {b.guest_last_name}</strong> ({b.guest_phone})
-                            </span>
-                            <span style={{ fontSize: '0.85rem', color: '#cbd5e1' }}>
-                              Requested: <strong>{b.room_type}</strong> room | Stay: <strong>{b.check_in} to {b.check_out}</strong>
-                            </span>
-                            <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>
-                              Auto-assigned Block: <strong>Room {b.room_number}</strong> | KYC Status: {isPendingKYC ? (
-                                <span style={{ color: '#fbbf24', fontWeight: 'bold' }}>⚠️ Pending Verification</span>
-                              ) : (
-                                <span style={{ color: '#34d399', fontWeight: 'bold' }}>✅ Detail Verified</span>
-                              )}
-                            </span>
-                          </div>
-                          <div className="alert-actions">
-                            <button 
-                              className="btn-verify-request"
-                              onClick={() => {
-                                handleOpenInfoModal(b);
-                              }}
-                            >
-                              Verify & Allocate
-                            </button>
-                            {isPendingKYC && (
-                              <button 
-                                className="btn-approve-request"
-                                onClick={() => handleToggleKYCVerification(b.id, true)}
-                              >
-                                Approve Booking
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* Stay Expiry Alerts */}
-              {overdueBookings.length > 0 && (
-                <div className="overdue-alerts-container">
-                  <div className="alerts-header">
-                    <span className="alerts-icon">⚠️</span>
-                    <h3>Overdue Check-Out Alerts ({overdueBookings.length})</h3>
-                  </div>
-                  <div className="alerts-list">
-                    {overdueBookings.map(b => (
-                      <div key={b.id} className="alert-card">
-                        <div className="alert-info">
-                          <span style={{ fontSize: '1rem' }}>
-                            Room <strong>{b.room_number}</strong> ({b.room_type}) - Guest: <strong>{b.guest_first_name} {b.guest_last_name}</strong>
-                          </span>
-                          <span className="alert-time-badge">
-                            ⏰ Scheduled Check-Out was: {b.check_out} at {b.check_out_time}
-                          </span>
-                        </div>
-                        <div className="alert-actions">
-                          <button 
-                            className="btn-checkout-alert"
-                            onClick={() => handleQuickCheckout(b.id)}
-                          >
-                            Check-Out
-                          </button>
-                          <button 
-                            className="btn-contact-alert"
-                            onClick={() => handleOpenContactModal(b)}
-                          >
-                            Contact Guest
-                          </button>
-                        </div>
+            <div className="manager-dashboard-layout">
+              {/* Alerts & Requests Flex Row */}
+              {(bookingRequests.length > 0 || overdueBookings.length > 0 || pendingRefundBookings.length > 0) && (
+                <div className="alerts-row-wrapper">
+                  {bookingRequests.length > 0 && (
+                    <div className="booking-requests-container" style={{ flex: 1, marginBottom: 0 }}>
+                      <div className="alerts-header">
+                        <span className="alerts-icon">📩</span>
+                        <h3>Guest Booking Requests ({bookingRequests.length})</h3>
                       </div>
-                    ))}
-                  </div>
+                      <div className="alerts-list">
+                        {bookingRequests.map(b => {
+                          const isPendingKYC = b.kyc && !b.kyc.kyc_verified;
+                          return (
+                            <div key={b.id} className="request-card">
+                              <div className="alert-info">
+                                <span style={{ fontSize: '1.0rem' }}>
+                                  Guest: <strong>{b.guest_first_name} {b.guest_last_name}</strong> ({b.guest_phone})
+                                </span>
+                                <span style={{ fontSize: '0.85rem', color: '#cbd5e1' }}>
+                                  Requested: <strong>{b.room_type}</strong> room | Stay: <strong>{b.check_in} to {b.check_out}</strong>
+                                </span>
+                                <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>
+                                  Auto-assigned Block: <strong>Room {b.room_number}</strong> | KYC Status: {isPendingKYC ? (
+                                    <span style={{ color: '#fbbf24', fontWeight: 'bold' }}>⚠️ Pending Verification</span>
+                                  ) : (
+                                    <span style={{ color: '#34d399', fontWeight: 'bold' }}>✅ Detail Verified</span>
+                                  )}
+                                </span>
+                              </div>
+                              <div className="alert-actions">
+                                <button 
+                                  className="btn-verify-request"
+                                  onClick={() => {
+                                    handleOpenInfoModal(b);
+                                  }}
+                                >
+                                  Verify & Allocate
+                                </button>
+                                {isPendingKYC && (
+                                  <button 
+                                    className="btn-approve-request"
+                                    onClick={() => handleToggleKYCVerification(b.id, true)}
+                                  >
+                                    Approve Booking
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {overdueBookings.length > 0 && (
+                    <div className="overdue-alerts-container" style={{ flex: 1, marginBottom: 0 }}>
+                      <div className="alerts-header">
+                        <span className="alerts-icon">⚠️</span>
+                        <h3>Overdue Check-Out Alerts ({overdueBookings.length})</h3>
+                      </div>
+                      <div className="alerts-list">
+                        {overdueBookings.map(b => (
+                          <div key={b.id} className="alert-card">
+                            <div className="alert-info">
+                              <span style={{ fontSize: '1rem' }}>
+                                Room <strong>{b.room_number}</strong> ({b.room_type}) - Guest: <strong>{b.guest_first_name} {b.guest_last_name}</strong>
+                              </span>
+                              <span className="alert-time-badge">
+                                ⏰ Scheduled Check-Out was: {b.check_out} at {b.check_out_time}
+                              </span>
+                            </div>
+                            <div className="alert-actions">
+                              <button 
+                                className="btn-checkout-alert"
+                                onClick={() => handleQuickCheckout(b.id)}
+                              >
+                                Check-Out
+                              </button>
+                              <button 
+                                className="btn-contact-alert"
+                                onClick={() => handleOpenContactModal(b)}
+                              >
+                                Contact Guest
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {pendingRefundBookings.length > 0 && (
+                    <div className="pending-refunds-container" style={{ flex: 1, marginBottom: 0 }}>
+                      <div className="alerts-header">
+                        <span className="alerts-icon">⏳</span>
+                        <h3>Pending Refund Approvals ({pendingRefundBookings.length})</h3>
+                      </div>
+                      <div className="alerts-list">
+                        {pendingRefundBookings.map(b => (
+                          <div key={b.id} className="request-card" style={{ borderColor: 'rgba(245, 158, 11, 0.2)' }}>
+                            <div className="alert-info">
+                              <span style={{ fontSize: '1.0rem' }}>
+                                Room <strong>{b.room_number || 'Unassigned'}</strong> - Guest: <strong>{b.guest_first_name} {b.guest_last_name}</strong>
+                              </span>
+                              <span style={{ fontSize: '0.85rem', color: '#cbd5e1' }}>
+                                Status: <strong style={{ color: b.status === 'Cancelled' ? '#cbd5e1' : '#ef4444' }}>{b.status}</strong> | Stay: <strong>{b.check_in} to {b.check_out}</strong>
+                              </span>
+                              <span style={{ fontSize: '0.8rem', color: '#fbbf24', fontWeight: 'bold' }}>
+                                ⏳ Refund Due: ₹{(parseFloat(b.advance_paid) * 0.9).toFixed(2)} (Paid: ₹{parseFloat(b.advance_paid).toLocaleString('en-IN')})
+                              </span>
+                            </div>
+                            <div className="alert-actions">
+                              <button 
+                                className="btn-verify-request"
+                                style={{ background: 'linear-gradient(135deg, #fbbf24, #d97706)', color: '#000', fontSize: '0.75rem', fontWeight: 'bold', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', border: 'none' }}
+                                onClick={() => {
+                                  setSelectedBooking(b);
+                                  setCancelRefundAmount((parseFloat(b.advance_paid) * 0.9).toFixed(2));
+                                  setCancelPaymentMethod('Cash');
+                                  setCancelModalMode(b.status === 'Cancelled' ? 'cancel' : 'reject');
+                                  setRejectionReason('Refund processed by manager');
+                                  setCustomRejectionReason('');
+                                  setCancelModalOpen(true);
+                                }}
+                              >
+                                💰 Approve Refund
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -2843,7 +2976,7 @@ function App() {
                 </div>
               </div>
               )}
-            </>
+            </div>
           )}
 
           {/* Quick Reservation Modal */}
@@ -3244,19 +3377,39 @@ function App() {
                         🧹 Mark as Cleaned
                       </div>
                     ) : (
-                      !contextMenu.booking.checked_out && (
-                        <div 
-                          className="context-menu-item danger"
-                          onClick={() => {
-                            setCancelRefundAmount(contextMenu.booking.advance_paid);
-                            setCancelPaymentMethod('Cash');
-                            setCancelModalOpen(true);
-                            setContextMenu(prev => ({ ...prev, visible: false }));
-                          }}
-                        >
-                          ❌ Cancel Reservation
-                        </div>
-                      )
+                      !contextMenu.booking.checked_out && (() => {
+                        const status = contextMenu.booking.status;
+                        const isEndedStatus = status === 'Cancelled' || status === 'Rejected';
+                        const txns = contextMenu.booking.transactions || [];
+                        const hasRefund = txns.some(t => parseFloat(t.amount) < 0);
+                        const hasAdvance = parseFloat(contextMenu.booking.advance_paid || 0) > 0;
+                        const needsRefund = isEndedStatus && hasAdvance && !hasRefund;
+
+                        if (isEndedStatus && !needsRefund) {
+                          return null;
+                        }
+
+                        return (
+                          <div 
+                            className="context-menu-item danger"
+                            style={needsRefund ? { color: '#fbbf24' } : {}}
+                            onClick={() => {
+                              const booking = contextMenu.booking;
+                              const advancePaid = parseFloat(booking.advance_paid || 0);
+                              const refundVal = advancePaid > 0 ? (advancePaid * 0.9).toFixed(2) : '0.00';
+                              setCancelRefundAmount(refundVal);
+                              setCancelPaymentMethod('Cash');
+                              setCancelModalMode(isEndedStatus ? 'cancel' : (booking.status === 'Booked' && !booking.kyc?.kyc_verified ? 'reject' : 'cancel'));
+                              setRejectionReason(isEndedStatus ? 'Refund processed by manager' : (booking.status === 'Booked' && !booking.kyc?.kyc_verified ? 'Rooms not available' : 'Got a different hotel nearby'));
+                              setCustomRejectionReason('');
+                              setCancelModalOpen(true);
+                              setContextMenu(prev => ({ ...prev, visible: false }));
+                            }}
+                          >
+                            {needsRefund ? '💰 Process Refund' : '❌ Cancel Reservation'}
+                          </div>
+                        );
+                      })()
                     )}
                   </>
                 );
@@ -3352,8 +3505,13 @@ function App() {
                           className="btn-checkout-alert"
                           style={{ padding: '6px 16px', fontSize: '0.8rem', height: '32px' }}
                           onClick={() => {
-                            setCancelRefundAmount(selectedBooking.advance_paid);
+                            const advancePaid = parseFloat(selectedBooking.advance_paid || 0);
+                            const refundVal = advancePaid > 0 ? (advancePaid * 0.9).toFixed(2) : '0.00';
+                            setCancelRefundAmount(refundVal);
                             setCancelPaymentMethod('Cash');
+                            setCancelModalMode('reject');
+                            setRejectionReason('Rooms not available');
+                            setCustomRejectionReason('');
                             setCancelModalOpen(true);
                           }}
                         >
@@ -3615,12 +3773,41 @@ function App() {
 
                 <div className="modal-actions" style={{ justifyContent: 'space-between', display: 'flex', width: '100%', borderTop: '1px solid rgba(255, 255, 255, 0.05)', paddingTop: '12px', marginTop: '12px' }}>
                   {(() => {
-                    const isEnded = selectedBooking.checked_out || selectedBooking.status === 'Cancelled' || selectedBooking.status === 'Rejected';
+                    const txns = selectedBooking.transactions || [];
+                    const hasRefund = txns.some(t => parseFloat(t.amount) < 0);
+                    const hasAdvance = parseFloat(selectedBooking.advance_paid || 0) > 0;
+                    const needsRefundApproval = (selectedBooking.status === 'Cancelled' || selectedBooking.status === 'Rejected') && hasAdvance && !hasRefund;
+
+                    const isEnded = selectedBooking.checked_out || ((selectedBooking.status === 'Cancelled' || selectedBooking.status === 'Rejected') && !needsRefundApproval);
                     const currentRoomObj = rooms.find(r => Number(r.id) === Number(selectedBooking.room_id));
                     const roomIsDirty = currentRoomObj && currentRoomObj.cleanliness === 'dirty';
                     
                     if (isEnded) {
                       return <div />;
+                    }
+                    
+                    if (needsRefundApproval) {
+                      return (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                          <button 
+                            type="button" 
+                            className="btn-submit-modal" 
+                            style={{ background: 'linear-gradient(135deg, #fbbf24, #d97706)', border: 'none', color: '#000', height: '30px', padding: '0 12px', display: 'flex', alignItems: 'center', fontSize: '0.75rem', fontWeight: 'bold' }}
+                            onClick={() => {
+                              const advancePaid = parseFloat(selectedBooking.advance_paid || 0);
+                              const refundVal = advancePaid > 0 ? (advancePaid * 0.9).toFixed(2) : '0.00';
+                              setCancelRefundAmount(refundVal);
+                              setCancelPaymentMethod('Cash');
+                              setCancelModalMode('cancel');
+                              setRejectionReason('Refund processed by manager');
+                              setCustomRejectionReason('');
+                              setCancelModalOpen(true);
+                            }}
+                          >
+                            💰 Process & Approve Refund
+                          </button>
+                        </div>
+                      );
                     }
                     
                     return (
@@ -3631,8 +3818,13 @@ function App() {
                             className="btn-cancel" 
                             style={{ background: 'rgba(239, 68, 68, 0.1)', borderColor: 'rgba(239, 68, 68, 0.3)', color: '#ef4444', height: '30px', padding: '0 12px', display: 'flex', alignItems: 'center', fontSize: '0.75rem' }}
                             onClick={() => {
-                              setCancelRefundAmount(selectedBooking.advance_paid);
+                              const advancePaid = parseFloat(selectedBooking.advance_paid || 0);
+                              const refundVal = advancePaid > 0 ? (advancePaid * 0.9).toFixed(2) : '0.00';
+                              setCancelRefundAmount(refundVal);
                               setCancelPaymentMethod('Cash');
+                              setCancelModalMode('cancel');
+                              setRejectionReason('Got a different hotel nearby');
+                              setCustomRejectionReason('');
                               setCancelModalOpen(true);
                             }}
                           >
@@ -3837,6 +4029,52 @@ function App() {
               </div>
             </div>
           )}
+          {/* Customer Cancel Reservation & Refund Request Modal */}
+          {customerCancelModalOpen && customerCancelBooking && (
+            <div className="modal-backdrop" style={{ zIndex: 10000 }} onClick={() => setCustomerCancelModalOpen(false)}>
+              <div className="modal-content" style={{ maxWidth: '400px', background: '#020617', border: '1px solid #1e293b' }} onClick={e => e.stopPropagation()}>
+                <div className="modal-header">
+                  <h3>❌ Cancel Stay & Request Refund</h3>
+                  <button className="btn-close" onClick={() => setCustomerCancelModalOpen(false)}>&times;</button>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '12px', fontSize: '0.85rem' }}>
+                  <div style={{ background: 'rgba(239, 68, 68, 0.05)', border: '1px solid rgba(239, 68, 68, 0.2)', padding: '10px 12px', borderRadius: '8px' }}>
+                    Are you sure you want to cancel your stay from <strong>{customerCancelBooking.check_in} to {customerCancelBooking.check_out}</strong>?
+                  </div>
+                  
+                  <div>
+                    <div style={{ marginBottom: '8px' }}>Total Paid So Far: <strong>₹{parseFloat(customerCancelBooking.advance_paid || 0).toLocaleString('en-IN')}</strong></div>
+                    <div style={{ borderTop: '1px dashed rgba(255,255,255,0.1)', paddingTop: '8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', color: '#f87171' }}>
+                        <span>Retention Fee (10% held):</span>
+                        <span>₹{(parseFloat(customerCancelBooking.advance_paid || 0) * 0.1).toFixed(2)}</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', color: '#34d399', fontWeight: 'bold', fontSize: '0.9rem' }}>
+                        <span>Refundable Amount (90%):</span>
+                        <span>₹{(parseFloat(customerCancelBooking.advance_paid || 0) * 0.9).toFixed(2)}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ background: 'rgba(251, 191, 36, 0.05)', border: '1px solid rgba(251, 191, 36, 0.2)', padding: '10px 12px', borderRadius: '8px', color: '#fbbf24', fontSize: '0.8rem' }}>
+                    ℹ️ <strong>Refund Notice:</strong> Your refund will be credited/refunded within <strong>24 hours</strong>.
+                  </div>
+
+                  <div className="modal-actions" style={{ marginTop: '12px' }}>
+                    <button type="button" className="btn-cancel" onClick={() => setCustomerCancelModalOpen(false)}>Close</button>
+                    <button 
+                      type="button" 
+                      className="btn-danger" 
+                      style={{ background: 'linear-gradient(135deg, #ef4444, #dc2626)', border: 'none', color: '#fff', fontWeight: 'bold' }}
+                      onClick={handleCustomerCancelBookingConfirmed}
+                    >
+                      Confirm Cancel & Request Refund
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
           {checkoutModalOpen && (contextMenu.booking || selectedBooking) && (
             <div className="modal-backdrop" style={{ zIndex: 10000 }} onClick={() => setCheckoutModalOpen(false)}>
               <div className="modal-content" style={{ maxWidth: '450px' }} onClick={e => e.stopPropagation()}>
@@ -3914,14 +4152,21 @@ function App() {
             <div className="modal-backdrop" style={{ zIndex: 10000 }} onClick={() => setCancelModalOpen(false)}>
               <div className="modal-content" style={{ maxWidth: '400px' }} onClick={e => e.stopPropagation()}>
                 <div className="modal-header">
-                  <h3>❌ Cancel Reservation</h3>
+                  <h3>{cancelModalMode === 'cancel' ? '❌ Cancel Reservation' : '❌ Reject Reservation'}</h3>
                   <button className="btn-close" onClick={() => setCancelModalOpen(false)}>&times;</button>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '8px', fontSize: '0.85rem' }}>
                   <div style={{ color: '#fb7185', background: 'rgba(244, 63, 94, 0.05)', padding: '8px', borderRadius: '6px', marginBottom: '4px' }}>
-                    ⚠️ This action cancels the booking and vacates the room immediately.
+                    {cancelModalMode === 'cancel' 
+                      ? '⚠️ This action cancels the booking and vacates the room immediately.' 
+                      : '⚠️ This action rejects the booking request and disapproves the reservation.'}
                   </div>
-                  <div>Total Paid So Far: <strong>₹{parseFloat((contextMenu.booking || selectedBooking).advance_paid).toLocaleString('en-IN')}</strong></div>
+                  {(contextMenu.booking || selectedBooking) && ((contextMenu.booking || selectedBooking).status === 'Cancelled' || (contextMenu.booking || selectedBooking).status === 'Rejected') && (
+                    <div style={{ background: 'rgba(59, 130, 246, 0.05)', border: '1px solid rgba(59, 130, 246, 0.2)', padding: '8px', borderRadius: '6px', color: '#60a5fa', fontSize: '0.8rem', marginBottom: '4px' }}>
+                      ℹ️ <strong>Immediate Refund Approval:</strong> Approving this will immediately refund the customer. If not approved manually now, the refund will be automatically credited to their bank account within 24 hours.
+                    </div>
+                  )}
+                  <div>Total Paid So Far: <strong>₹{parseFloat((contextMenu.booking || selectedBooking).advance_paid || 0).toLocaleString('en-IN')}</strong></div>
                   
                   <div className="form-group">
                     <label className="form-label">Refund Amount (₹)</label>
@@ -3932,6 +4177,9 @@ function App() {
                       value={cancelRefundAmount}
                       onChange={e => setCancelRefundAmount(e.target.value)}
                     />
+                    <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '4px' }}>
+                      10% retention fee held: ₹{(parseFloat((contextMenu.booking || selectedBooking).advance_paid || 0) * 0.1).toFixed(2)}
+                    </div>
                   </div>
                   <div className="form-group">
                     <label className="form-label">Refund Method</label>
@@ -3950,26 +4198,37 @@ function App() {
                   {userRole !== 'customer' && (
                     <>
                       <div className="form-group" style={{ marginTop: '10px' }}>
-                        <label className="form-label">Rejection Reason</label>
+                        <label className="form-label">{cancelModalMode === 'cancel' ? 'Cancellation Reason' : 'Rejection Reason'}</label>
                         <select
                           className="input-control"
                           value={rejectionReason}
                           onChange={e => setRejectionReason(e.target.value)}
                           style={{ background: '#0f172a' }}
                         >
-                          <option value="Rooms not available">Rooms not available</option>
-                          <option value="Documents incomplete / invalid">Documents incomplete / invalid</option>
-                          <option value="KYC verification failed">KYC verification failed</option>
-                          <option value="Other">Other (Specify below)</option>
+                          {cancelModalMode === 'cancel' ? (
+                            <>
+                              <option value="Got a different hotel nearby">Got a different hotel nearby</option>
+                              <option value="Travel plans changed">Travel plans changed</option>
+                              <option value="Booking made by mistake">Booking made by mistake</option>
+                              <option value="Other">Other (Specify below)</option>
+                            </>
+                          ) : (
+                            <>
+                              <option value="Rooms not available">Rooms not available</option>
+                              <option value="Documents incomplete / invalid">Documents incomplete / invalid</option>
+                              <option value="KYC verification failed">KYC verification failed</option>
+                              <option value="Other">Other (Specify below)</option>
+                            </>
+                          )}
                         </select>
                       </div>
                       {rejectionReason === 'Other' && (
                         <div className="form-group">
-                          <label className="form-label">Custom Rejection Reason</label>
+                          <label className="form-label">{cancelModalMode === 'cancel' ? 'Custom Cancellation Reason' : 'Custom Rejection Reason'}</label>
                           <input
                             type="text"
                             className="input-control"
-                            placeholder="Enter custom rejection reason"
+                            placeholder={cancelModalMode === 'cancel' ? "Enter custom cancellation reason" : "Enter custom rejection reason"}
                             value={customRejectionReason}
                             onChange={e => setCustomRejectionReason(e.target.value)}
                           />
@@ -3985,7 +4244,7 @@ function App() {
                       className="btn-danger"
                       onClick={handleConfirmCancel}
                     >
-                      Confirm Cancel & Refund
+                      {cancelModalMode === 'cancel' ? 'Confirm Cancel & Refund' : 'Confirm Rejection & Refund'}
                     </button>
                   </div>
                 </div>
@@ -3996,13 +4255,13 @@ function App() {
             <div className="modal-backdrop" style={{ zIndex: 11000 }} onClick={() => setReceiptModalOpen(false)}>
               <div className="modal-content" style={{ maxWidth: '400px', background: '#020617', border: '1px solid #1e293b' }} onClick={e => e.stopPropagation()}>
                 <div className="modal-header" style={{ borderBottom: '1px dashed rgba(255,255,255,0.1)' }}>
-                  <h3>🧾 {receiptData.type === 'cancellation' ? 'Cancellation Receipt' : receiptData.type === 'total_bill' ? 'Invoice & Payment Receipt' : 'Payment Receipt'}</h3>
+                  <h3>🧾 {(receiptData.type === 'cancellation' || receiptData.type === 'rejection') ? (receiptData.type === 'cancellation' ? 'Cancellation Receipt' : 'Rejection Receipt') : receiptData.type === 'total_bill' ? 'Invoice & Payment Receipt' : 'Payment Receipt'}</h3>
                   <button className="btn-close" onClick={() => setReceiptModalOpen(false)}>&times;</button>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '12px', fontSize: '0.85rem', fontFamily: 'monospace' }}>
                   <div style={{ textAlign: 'center', fontSize: '1rem', fontWeight: 'bold', marginBottom: '8px', textTransform: 'uppercase' }}>Abhirami Hotel Group</div>
                   <div style={{ textAlign: 'center', color: '#94a3b8', marginBottom: '12px' }}>
-                    {receiptData.type === 'cancellation' ? 'Cancellation & Refund Voucher' : receiptData.type === 'total_bill' ? 'Invoice & Payment Receipt' : 'Payment Receipt Voucher'}
+                    {(receiptData.type === 'cancellation' || receiptData.type === 'rejection') ? (receiptData.type === 'cancellation' ? 'Cancellation & Refund Voucher' : 'Rejection & Refund Voucher') : receiptData.type === 'total_bill' ? 'Invoice & Payment Receipt' : 'Payment Receipt Voucher'}
                   </div>
                   <div>Date/Time: {receiptData.timestamp}</div>
                   <div>Guest Name: {receiptData.guestName}</div>
@@ -4010,15 +4269,20 @@ function App() {
                   {receiptData.roomType && <div>Room Type: {receiptData.roomType}</div>}
                   <div style={{ borderTop: '1px dashed rgba(255,255,255,0.1)', margin: '8px 0' }}></div>
                   
-                  {receiptData.type === 'cancellation' ? (
+                  {(receiptData.type === 'cancellation' || receiptData.type === 'rejection') ? (
                     <>
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1rem', fontWeight: 'bold' }}>
                         <span>REFUND AMOUNT:</span>
                         <span>₹{receiptData.refundAmount.toLocaleString('en-IN')}</span>
                       </div>
                       <div>Refund Method: {receiptData.paymentMethod}</div>
+                      {receiptData.reason && (
+                        <div>Reason: {receiptData.reason}</div>
+                      )}
                       <div style={{ borderTop: '1px dashed rgba(255,255,255,0.1)', margin: '8px 0' }}></div>
-                      <div style={{ textAlign: 'center', color: '#fb7185', fontWeight: 'bold', fontSize: '0.75rem', marginTop: '6px' }}>REFUND COMPLETED - BOOKING TERMINATED</div>
+                      <div style={{ textAlign: 'center', color: '#fb7185', fontWeight: 'bold', fontSize: '0.75rem', marginTop: '6px' }}>
+                        {receiptData.type === 'cancellation' ? 'REFUND COMPLETED - BOOKING TERMINATED' : 'REFUND COMPLETED - BOOKING REJECTED'}
+                      </div>
                     </>
                   ) : receiptData.type === 'total_bill' ? (
                     <>
@@ -4122,7 +4386,7 @@ function App() {
           {isRegisterMode ? (
             // Customer Registration Form
             <form onSubmit={handleRegister}>
-              <h2 style={{ fontSize: '4.5rem', marginBottom: '4rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '24px', color: '#a78bfa', textAlign: 'center' }}>📝 Register Guest Account</h2>
+              <h2 style={{ fontSize: '2rem', marginBottom: '1.5rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '12px', color: '#a78bfa', textAlign: 'center' }}>📝 Register Guest Account</h2>
               
               <div className="form-group">
                 <label className="form-label">Email Address (Username)</label>
@@ -4158,7 +4422,7 @@ function App() {
                 {loading ? 'Registering Account...' : 'Register'}
               </button>
 
-              <div style={{ textAlign: 'center', marginTop: '2.5rem', fontSize: '1.6rem' }}>
+              <div style={{ textAlign: 'center', marginTop: '1.5rem', fontSize: '0.95rem' }}>
                 Already have an account?{' '}
                 <span 
                   onClick={() => setIsRegisterMode(false)} 
@@ -4171,7 +4435,7 @@ function App() {
           ) : (
             // Login Form
             <form onSubmit={handleLogin}>
-              <h2 style={{ fontSize: '4.5rem', marginBottom: '4rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '24px', color: '#a78bfa', textAlign: 'center' }}>🔑 Sign In</h2>
+              <h2 style={{ fontSize: '2rem', marginBottom: '1.5rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '12px', color: '#a78bfa', textAlign: 'center' }}>🔑 Sign In</h2>
               
               <div className="form-group">
                 <label className="form-label">Username</label>
@@ -4220,7 +4484,7 @@ function App() {
                 {loading ? 'Authenticating...' : 'Sign In'}
               </button>
 
-              <div style={{ textAlign: 'center', marginTop: '2.5rem', fontSize: '1.6rem' }}>
+              <div style={{ textAlign: 'center', marginTop: '1.5rem', fontSize: '0.95rem' }}>
                 New guest?{' '}
                 <span 
                   onClick={() => setIsRegisterMode(true)} 
