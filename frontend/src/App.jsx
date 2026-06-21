@@ -274,7 +274,11 @@ function App() {
       advance_paid: room.min_advance,
       advance_status: 'Paid',
       payment_method: 'Cash',
-      receipt_id: ''
+      receipt_id: '',
+      kyc_type: 'Aadhaar',
+      kyc_number: '',
+      kyc_front: null,
+      kyc_back: null
     });
     setModalOpen(true);
   };
@@ -302,7 +306,11 @@ function App() {
       advance_paid: booking.advance_paid,
       advance_status: booking.advance_status || 'Paid',
       payment_method: 'Cash',
-      receipt_id: booking.transactions && booking.transactions.length > 0 ? (booking.transactions[0].receipt_id || '') : ''
+      receipt_id: booking.transactions && booking.transactions.length > 0 ? (booking.transactions[0].receipt_id || '') : '',
+      kyc_type: booking.kyc?.kyc_type || 'Aadhaar',
+      kyc_number: booking.kyc?.kyc_number || '',
+      kyc_front: null,
+      kyc_back: null
     });
     setModalOpen(true);
   };
@@ -597,14 +605,13 @@ function App() {
           throw new Error(payData.detail || 'Checkout payment logging failed');
         }
       }
-      
-      const checkoutRes = await fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/${targetBooking.id}/`, {
+            const checkoutRes = await fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/${targetBooking.id}/`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Token ${token}`
         },
-        body: JSON.stringify({ status: 'dirty', checked_out: true })
+        body: JSON.stringify({ status: 'Checked_out', checked_out: true })
       });
       if (!checkoutRes.ok) throw new Error('Failed to check out booking');
       
@@ -674,7 +681,7 @@ function App() {
         'Authorization': `Token ${token}`
       },
       body: JSON.stringify({
-        status: 'dirty',
+        status: 'Checked_out',
         checked_out: true
       })
     })
@@ -687,6 +694,12 @@ function App() {
       })
       .then(() => {
         triggerToast('Guest checked out successfully! Room status set to dirty.');
+        // Refresh rooms
+        fetch(`http://127.0.0.1:8000/api/my-hotel/rooms/?hotel_code=${hotelCode}`, {
+          headers: { 'Authorization': `Token ${token}` }
+        })
+          .then(res => res.json())
+          .then(data => setRooms(data));
         // Refresh bookings
         fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/?hotel_code=${hotelCode}`, {
           headers: { 'Authorization': `Token ${token}` }
@@ -778,28 +791,40 @@ function App() {
       
     const method = isEditMode ? 'PUT' : 'POST';
 
+    // Build FormData instead of JSON to support file uploads
+    const formData = new FormData();
+    formData.append('room_id', selectedRoom.id);
+    formData.append('guest_first_name', newBooking.guest_first_name);
+    formData.append('guest_last_name', newBooking.guest_last_name);
+    formData.append('guest_phone', newBooking.guest_phone);
+    formData.append('guest_email', newBooking.guest_email || '');
+    formData.append('check_in', newBooking.check_in);
+    formData.append('check_out', newBooking.check_out);
+    formData.append('status', newBooking.status);
+    formData.append('advance_paid', newBooking.advance_status === 'Unpaid' ? 0.00 : advancePaidNum);
+    formData.append('advance_status', newBooking.advance_status);
+    formData.append('payment_method', newBooking.payment_method);
+    formData.append('receipt_id', newBooking.receipt_id || '');
+
+    if (newBooking.kyc_type) {
+      formData.append('kyc_type', newBooking.kyc_type);
+    }
+    if (newBooking.kyc_number) {
+      formData.append('kyc_number', newBooking.kyc_number);
+    }
+    if (newBooking.kyc_front) {
+      formData.append('kyc_front', newBooking.kyc_front);
+    }
+    if (newBooking.kyc_back) {
+      formData.append('kyc_back', newBooking.kyc_back);
+    }
+
     fetch(url, {
       method: method,
       headers: {
-        'Content-Type': 'application/json',
         'Authorization': `Token ${token}`
       },
-      body: JSON.stringify({
-        room_id: selectedRoom.id,
-        guest_first_name: newBooking.guest_first_name,
-        guest_last_name: newBooking.guest_last_name,
-        guest_phone: newBooking.guest_phone,
-        guest_email: newBooking.guest_email,
-        check_in: newBooking.check_in,
-        check_in_time: newBooking.check_in_time,
-        check_out: newBooking.check_out,
-        check_out_time: newBooking.check_out_time,
-        status: newBooking.status,
-        advance_paid: newBooking.advance_status === 'Unpaid' ? 0.00 : advancePaidNum,
-        advance_status: newBooking.advance_status,
-        payment_method: newBooking.payment_method,
-        receipt_id: newBooking.receipt_id
-      })
+      body: formData
     })
       .then(async res => {
         const data = await res.json();
@@ -826,6 +851,13 @@ function App() {
           setReceiptModalOpen(true);
         }
 
+        // Refresh rooms
+        fetch(`http://127.0.0.1:8000/api/my-hotel/rooms/?hotel_code=${hotelCode}`, {
+          headers: { 'Authorization': `Token ${token}` }
+        })
+          .then(res => res.json())
+          .then(data => setRooms(data));
+
         // Refresh bookings
         fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/?hotel_code=${hotelCode}`, {
           headers: { 'Authorization': `Token ${token}` }
@@ -842,52 +874,71 @@ function App() {
   };
 
   const handleDeleteBooking = () => {
-    const isDirty = newBooking.status === 'dirty';
+    const isDirty = selectedRoom?.cleanliness === 'dirty';
     const confirmMsg = isDirty 
       ? 'Are you sure you want to mark this room as cleaned?' 
       : 'Are you sure you want to cancel this reservation?';
     
     if (!window.confirm(confirmMsg)) return;
     
-    const url = `http://127.0.0.1:8000/api/my-hotel/bookings/${editingBookingId}/`;
-    const method = isDirty ? 'PUT' : 'DELETE';
-    const headers = {
-      'Authorization': `Token ${token}`
-    };
     if (isDirty) {
-      headers['Content-Type'] = 'application/json';
-    }
-    
-    const todayStr = formatDate(new Date());
-    const restoredStatus = newBooking.check_in <= todayStr ? 'Checked_in' : 'Booked';
-    const body = isDirty ? JSON.stringify({ status: restoredStatus }) : undefined;
-
-    fetch(url, {
-      method,
-      headers,
-      body
-    })
-      .then(async res => {
-        if (!res.ok) {
-          const data = await res.json();
-          throw new Error(data.detail || 'Failed to process request');
+      // Mark room as clean
+      fetch(`http://127.0.0.1:8000/api/my-hotel/rooms/${selectedRoom.id}/`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Token ${token}`
+        },
+        body: JSON.stringify({ cleanliness: 'clean' })
+      })
+        .then(async res => {
+          if (!res.ok) {
+            const data = await res.json();
+            throw new Error(data.detail || 'Failed to clean room');
+          }
+        })
+        .then(() => {
+          triggerToast('Room marked as cleaned!');
+          // Refresh rooms
+          fetch(`http://127.0.0.1:8000/api/my-hotel/rooms/?hotel_code=${hotelCode}`, {
+            headers: { 'Authorization': `Token ${token}` }
+          })
+            .then(res => res.json())
+            .then(data => setRooms(data));
+          // Refresh bookings
+          refreshBookings();
+          handleCloseModal();
+        })
+        .catch(err => {
+          console.error(err);
+          triggerToast(err.message || 'Error occurred while cleaning room.');
+        });
+    } else {
+      // Cancel reservation
+      const url = `http://127.0.0.1:8000/api/my-hotel/bookings/${editingBookingId}/`;
+      fetch(url, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Token ${token}`
         }
       })
-      .then(() => {
-        triggerToast(isDirty ? 'Room marked as cleaned!' : 'Reservation cancelled successfully!');
-        // Refresh bookings
-        fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/?hotel_code=${hotelCode}`, {
-          headers: { 'Authorization': `Token ${token}` }
+        .then(async res => {
+          if (!res.ok) {
+            const data = await res.json();
+            throw new Error(data.detail || 'Failed to cancel reservation');
+          }
         })
-          .then(res => res.json())
-          .then(data => setBookings(data));
-          
-        handleCloseModal();
-      })
-      .catch(err => {
-        console.error(err);
-        triggerToast(err.message || 'Error occurred while processing request.');
-      });
+        .then(() => {
+          triggerToast('Reservation cancelled successfully!');
+          // Refresh bookings
+          refreshBookings();
+          handleCloseModal();
+        })
+        .catch(err => {
+          console.error(err);
+          triggerToast(err.message || 'Error occurred while cancelling reservation.');
+        });
+    }
   };
 
   const handleQuickMarkCleaned = (bookingId) => {
@@ -896,68 +947,91 @@ function App() {
     
     if (!window.confirm('Are you sure you want to mark this room as cleaned?')) return;
     
-    const todayStr = formatDate(new Date());
-    const restoredStatus = booking.check_in <= todayStr ? 'Checked_in' : 'Booked';
-
-    fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/${bookingId}/`, {
+    fetch(`http://127.0.0.1:8000/api/my-hotel/rooms/${booking.room_id}/`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Token ${token}`
       },
-      body: JSON.stringify({ status: restoredStatus })
+      body: JSON.stringify({ cleanliness: 'clean' })
     })
       .then(async res => {
         if (!res.ok) {
           const data = await res.json();
-          throw new Error(data.detail || 'Failed to process request');
+          throw new Error(data.detail || 'Failed to clean room');
         }
       })
       .then(() => {
         triggerToast('Room marked as cleaned!');
-        // Refresh bookings
-        fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/?hotel_code=${hotelCode}`, {
+        // Refresh rooms
+        fetch(`http://127.0.0.1:8000/api/my-hotel/rooms/?hotel_code=${hotelCode}`, {
           headers: { 'Authorization': `Token ${token}` }
         })
           .then(res => res.json())
-          .then(data => setBookings(data));
+          .then(data => setRooms(data));
+        // Refresh bookings
+        refreshBookings();
       })
       .catch(err => {
         console.error(err);
-        triggerToast(err.message || 'Error occurred while processing request.');
+        triggerToast(err.message || 'Error occurred while cleaning room.');
       });
   };
 
   const handleUpdateCleanliness = async (newStatus) => {
     if (!selectedBooking) return;
     
-    let statusValue = newStatus;
-    if (newStatus === 'clean') {
-      const todayStr = formatDate(new Date());
-      statusValue = selectedBooking.check_in <= todayStr ? 'Checked_in' : 'Booked';
-    }
-    
     try {
-      const res = await fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/${selectedBooking.id}/`, {
+      const res = await fetch(`http://127.0.0.1:8000/api/my-hotel/rooms/${selectedBooking.room_id}/`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Token ${token}`
         },
-        body: JSON.stringify({ status: statusValue })
+        body: JSON.stringify({ cleanliness: newStatus })
       });
       if (!res.ok) {
         const data = await res.json();
-        throw new Error(data.detail || 'Failed to update status');
+        throw new Error(data.detail || 'Failed to update cleanliness');
       }
-      const updated = await res.json();
-      triggerToast(`Room status updated to ${statusValue === 'dirty' ? 'Dirty' : 'Clean'}!`);
-      setSelectedBooking(updated);
-      setBookings(prev => prev.map(b => b.id === updated.id ? updated : b));
-      refreshBookings(updated.id);
+      
+      triggerToast(`Room cleanliness marked as ${newStatus}!`);
+      
+      // Refresh room list
+      fetch(`http://127.0.0.1:8000/api/my-hotel/rooms/?hotel_code=${hotelCode}`, {
+        headers: { 'Authorization': `Token ${token}` }
+      })
+        .then(res => res.json())
+        .then(data => setRooms(data));
+      
+      // Refresh bookings
+      refreshBookings(selectedBooking.id);
     } catch (err) {
       triggerToast(err.message);
     }
+  };
+
+  const handleToggleKYCVerification = (bookingId, isVerified) => {
+    fetch(`http://127.0.0.1:8000/api/my-hotel/bookings/${bookingId}/`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Token ${token}`
+      },
+      body: JSON.stringify({ kyc_verified: isVerified })
+    })
+      .then(async res => {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed to update KYC status');
+        return data;
+      })
+      .then(data => {
+        triggerToast(`KYC status updated successfully!`);
+        setSelectedBooking(data);
+        setBookings(prev => prev.map(b => b.id === data.id ? data : b));
+        refreshBookings(data.id);
+      })
+      .catch(err => triggerToast(err.message));
   };
 
   // Toggle room cleanliness status is handled directly on booking records via the Allotment Details modal.
@@ -969,12 +1043,30 @@ function App() {
     while (i < 14) {
       const dateStr = formatDate(dates[i]);
       // Find booking covering dateStr
-      const booking = bookings.find(b => 
-        Number(b.room_id) === Number(room.id) && 
-        b.check_in <= dateStr && 
-        b.check_out > dateStr &&
-        !(b.checked_out && b.status !== 'dirty')
-      );
+      const booking = bookings.find(b => {
+        if (Number(b.room_id) !== Number(room.id)) return false;
+        
+        // Is dateStr within the booking's stay?
+        const isWithinStay = b.check_in <= dateStr && b.check_out > dateStr;
+        if (!isWithinStay) return false;
+
+        // If booking is active (Booked or Checked_in)
+        if (b.status === 'Booked' || b.status === 'Checked_in') {
+          return true;
+        }
+
+        // If booking is Checked_out:
+        if (b.status === 'Checked_out') {
+          // It only shows up if the room is currently dirty, AND this is the most recent Checked_out booking for this room.
+          if (room.cleanliness === 'dirty') {
+            const roomCheckedOuts = bookings
+              .filter(x => Number(x.room_id) === Number(room.id) && x.status === 'Checked_out')
+              .sort((a, b) => new Date(b.check_out) - new Date(a.check_out));
+            return roomCheckedOuts.length > 0 && roomCheckedOuts[0].id === b.id;
+          }
+        }
+        return false;
+      });
       
       if (booking) {
         // If booking check_in is today or earlier, and this is the first cell of the calendar, we render it.
@@ -988,11 +1080,13 @@ function App() {
           const nights = Math.max(1, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
           const span = Math.min(nights, 14 - i);
           
+          const isDirtyVisual = booking.status === 'Checked_out' && room.cleanliness === 'dirty';
+          
           cells.push(
             <td
               key={`booking-${booking.id}-${dateStr}`}
               colSpan={span}
-              className={`booking-cell status-${booking.status.toLowerCase().replace(' ', '-')}`}
+              className={`booking-cell status-${isDirtyVisual ? 'dirty' : booking.status.toLowerCase().replace(' ', '-')}`}
               onClick={(e) => {
                 e.stopPropagation();
                 handleOpenInfoModal(booking);
@@ -1017,7 +1111,7 @@ function App() {
               >
                 <div className="booking-header-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
                   <span className="booking-guest-name" style={{ maxWidth: '85%', fontStyle: booking.checked_out ? 'italic' : 'normal', opacity: booking.checked_out ? 0.75 : 1 }}>
-                    {booking.checked_out ? '🧹 Needs Cleaning (Checked Out)' : `${booking.guest_first_name} ${booking.guest_last_name}`}
+                    {isDirtyVisual ? '🧹 Needs Cleaning (Checked Out)' : `${booking.guest_first_name} ${booking.guest_last_name}`}
                   </span>
                   <span className="booking-edit-indicator" title="View Info / Notes" style={{ fontSize: '0.75rem', opacity: 0.6 }}>ℹ️</span>
                 </div>
@@ -1030,14 +1124,14 @@ function App() {
                       gap: '4px', 
                       padding: '2px 4px', 
                       borderRadius: '4px', 
-                      background: booking.checked_out
+                      background: isDirtyVisual
                         ? 'rgba(239, 68, 68, 0.2)'
                         : booking.status === 'Checked_in'
                         ? 'rgba(34, 197, 94, 0.2)'
                         : booking.status === 'Booked'
                         ? 'rgba(59, 130, 246, 0.2)'
                         : 'rgba(239, 68, 68, 0.2)',
-                      color: booking.checked_out
+                      color: isDirtyVisual
                         ? '#ef4444'
                         : booking.status === 'Checked_in'
                         ? '#4ade80'
@@ -1046,13 +1140,13 @@ function App() {
                         : '#ef4444'
                     }}
                   >
-                    {booking.checked_out
-                      ? '🚪 Checked-Out'
+                    {isDirtyVisual
+                      ? '🧹 Needs Cleaning'
                       : booking.status === 'Checked_in'
                       ? '✨ Checked-In'
                       : booking.status === 'Booked'
                       ? '📅 Booked'
-                      : '🧹 Needs Cleaning'}
+                      : '🚪 Checked-Out'}
                   </span>
                   <span className="booking-advance" style={booking.checked_out ? { color: 'var(--text-secondary)', fontSize: '0.7rem' } : (booking.advance_status === 'Unpaid' ? { color: '#f87171', fontSize: '0.65rem', fontWeight: 'bold' } : {})}>
                     {booking.checked_out ? '🚪 Checked Out' : (booking.advance_status === 'Unpaid' ? 'Incomplete Advance' : `₹${parseFloat(booking.advance_paid).toLocaleString('en-IN')}`)}
@@ -1312,7 +1406,7 @@ function App() {
                 </div>
                 
                 <form onSubmit={handleCreateBooking}>
-                  {isEditMode && newBooking.status === 'dirty' && (
+                  {isEditMode && selectedRoom?.cleanliness === 'dirty' && (
                     <div className="warning-banner" style={{
                       background: 'rgba(239, 68, 68, 0.1)',
                       border: '1px solid rgba(239, 68, 68, 0.3)',
@@ -1491,17 +1585,77 @@ function App() {
                         </div>
                       </>
                     )}
+
+                    {/* KYC Verification Section */}
+                    <div className="form-group col-span-2" style={{ borderTop: '1px solid rgba(255, 255, 255, 0.05)', paddingTop: '12px', marginTop: '12px' }}>
+                      <label className="form-label" style={{ fontWeight: 'bold', fontSize: '0.85rem', color: 'var(--primary)' }}>🆔 Customer KYC Verification</label>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '8px' }}>
+                        <div>
+                          <label className="form-label">ID Document Type</label>
+                          <select
+                            className="input-control"
+                            value={newBooking.kyc_type || 'Aadhaar'}
+                            onChange={e => setNewBooking(prev => ({ ...prev, kyc_type: e.target.value }))}
+                            style={{ background: 'rgba(15, 23, 42, 0.85)', color: '#fff' }}
+                          >
+                            <option value="Aadhaar">Aadhaar</option>
+                            <option value="PAN">PAN Card</option>
+                            <option value="Passport">Passport</option>
+                            <option value="VoterID">Voter ID</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="form-label">ID Document Number</label>
+                          <input
+                            type="text"
+                            className="input-control"
+                            placeholder="Enter Document Number"
+                            value={newBooking.kyc_number || ''}
+                            onChange={e => setNewBooking(prev => ({ ...prev, kyc_number: e.target.value }))}
+                          />
+                        </div>
+                      </div>
+                      
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '12px' }}>
+                        <div>
+                          <label className="form-label">ID Front Image</label>
+                          <input
+                            type="file"
+                            accept="image/*,application/pdf"
+                            className="input-control"
+                            style={{ padding: '8px', fontSize: '0.75rem', height: 'auto' }}
+                            onChange={e => {
+                              const file = e.target.files[0];
+                              setNewBooking(prev => ({ ...prev, kyc_front: file }));
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <label className="form-label">ID Back Image</label>
+                          <input
+                            type="file"
+                            accept="image/*,application/pdf"
+                            className="input-control"
+                            style={{ padding: '8px', fontSize: '0.75rem', height: 'auto' }}
+                            onChange={e => {
+                              const file = e.target.files[0];
+                              setNewBooking(prev => ({ ...prev, kyc_back: file }));
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </div>
                   </div>
 
                   <div className="modal-actions" style={{ justifyContent: 'space-between', display: 'flex', width: '100%' }}>
                     {isEditMode ? (
                       <button 
                         type="button" 
-                        className={newBooking.status === 'dirty' ? 'btn-submit-modal' : 'btn-cancel'}
-                        style={newBooking.status === 'dirty' ? { background: 'rgba(34, 197, 94, 0.1)', borderColor: 'rgba(34, 197, 94, 0.3)', color: '#22c55e' } : { background: 'rgba(239, 68, 68, 0.1)', borderColor: 'rgba(239, 68, 68, 0.3)', color: '#ef4444' }} 
+                        className={selectedRoom?.cleanliness === 'dirty' ? 'btn-submit-modal' : 'btn-cancel'}
+                        style={selectedRoom?.cleanliness === 'dirty' ? { background: 'rgba(34, 197, 94, 0.1)', borderColor: 'rgba(34, 197, 94, 0.3)', color: '#22c55e' } : { background: 'rgba(239, 68, 68, 0.1)', borderColor: 'rgba(239, 68, 68, 0.3)', color: '#ef4444' }} 
                         onClick={handleDeleteBooking}
                       >
-                        {newBooking.status === 'dirty' ? '🧹 Mark as Cleaned' : 'Cancel Reservation'}
+                        {selectedRoom?.cleanliness === 'dirty' ? '🧹 Mark as Cleaned' : 'Cancel Reservation'}
                       </button>
                     ) : (
                       <div></div>
@@ -1544,73 +1698,84 @@ function App() {
                 ✏️ Edit Booking Details
               </div>
               
-              {!contextMenu.booking.checked_out && (contextMenu.booking.status === 'Booked' || contextMenu.booking.status === 'dirty') && (
-                <div 
-                  className="context-menu-item"
-                  onClick={() => {
-                    setContextMenu(prev => ({ ...prev, visible: false }));
-                    handleCheckIn(contextMenu.booking.id);
-                  }}
-                >
-                  🟢 Check In Guest
-                </div>
-              )}
-              
-              {!contextMenu.booking.checked_out && contextMenu.booking.status !== 'dirty' && (
-                <div 
-                  className="context-menu-item"
-                  onClick={() => {
-                    setPaymentAmount('');
-                    setPaymentReceiptId('');
-                    setPaymentMethod('Cash');
-                    setPaymentModalOpen(true);
-                    setContextMenu(prev => ({ ...prev, visible: false }));
-                  }}
-                >
-                  💵 Add Payment (Advance)
-                </div>
-              )}
+              {(() => {
+                const contextRoom = rooms.find(r => Number(r.id) === Number(contextMenu.booking.room_id));
+                const contextRoomIsDirty = contextRoom && contextRoom.cleanliness === 'dirty';
+                
+                return (
+                  <>
+                    {!contextMenu.booking.checked_out && contextMenu.booking.status === 'Booked' && (
+                      <div 
+                        className="context-menu-item"
+                        onClick={() => {
+                          setContextMenu(prev => ({ ...prev, visible: false }));
+                          handleCheckIn(contextMenu.booking.id);
+                        }}
+                      >
+                        🟢 Check In Guest
+                      </div>
+                    )}
+                    
+                    {!contextMenu.booking.checked_out && (
+                      <div 
+                        className="context-menu-item"
+                        onClick={() => {
+                          setPaymentAmount('');
+                          setPaymentReceiptId('');
+                          setPaymentMethod('Cash');
+                          setPaymentModalOpen(true);
+                          setContextMenu(prev => ({ ...prev, visible: false }));
+                        }}
+                      >
+                        💵 Add Payment (Advance)
+                      </div>
+                    )}
 
-              {!contextMenu.booking.checked_out && (contextMenu.booking.status === 'Checked_in' || contextMenu.booking.status === 'dirty') && (
-                <div 
-                  className="context-menu-item"
-                  onClick={() => {
-                    setCheckoutPaymentMethod('Cash');
-                    setCheckoutReceiptId('');
-                    setCheckoutModalOpen(true);
-                    setContextMenu(prev => ({ ...prev, visible: false }));
-                  }}
-                >
-                  🚪 Check Out Guest
-                </div>
-              )}
-              
-              <div className="context-menu-divider"></div>
-              
-              {contextMenu.booking.status === 'dirty' ? (
-                <div 
-                  className="context-menu-item"
-                  style={{ color: '#4ade80' }}
-                  onClick={() => {
-                    setContextMenu(prev => ({ ...prev, visible: false }));
-                    handleQuickMarkCleaned(contextMenu.booking.id);
-                  }}
-                >
-                  🧹 Mark as Cleaned
-                </div>
-              ) : (
-                <div 
-                  className="context-menu-item danger"
-                  onClick={() => {
-                    setCancelRefundAmount(contextMenu.booking.advance_paid);
-                    setCancelPaymentMethod('Cash');
-                    setCancelModalOpen(true);
-                    setContextMenu(prev => ({ ...prev, visible: false }));
-                  }}
-                >
-                  ❌ Cancel Reservation
-                </div>
-              )}
+                    {!contextMenu.booking.checked_out && contextMenu.booking.status === 'Checked_in' && (
+                      <div 
+                        className="context-menu-item"
+                        onClick={() => {
+                          setCheckoutPaymentMethod('Cash');
+                          setCheckoutReceiptId('');
+                          setCheckoutModalOpen(true);
+                          setContextMenu(prev => ({ ...prev, visible: false }));
+                        }}
+                      >
+                        🚪 Check Out Guest
+                      </div>
+                    )}
+                    
+                    <div className="context-menu-divider"></div>
+                    
+                    {contextRoomIsDirty ? (
+                      <div 
+                        className="context-menu-item"
+                        style={{ color: '#4ade80' }}
+                        onClick={() => {
+                          setContextMenu(prev => ({ ...prev, visible: false }));
+                          handleQuickMarkCleaned(contextMenu.booking.id);
+                        }}
+                      >
+                        🧹 Mark as Cleaned
+                      </div>
+                    ) : (
+                      !contextMenu.booking.checked_out && (
+                        <div 
+                          className="context-menu-item danger"
+                          onClick={() => {
+                            setCancelRefundAmount(contextMenu.booking.advance_paid);
+                            setCancelPaymentMethod('Cash');
+                            setCancelModalOpen(true);
+                            setContextMenu(prev => ({ ...prev, visible: false }));
+                          }}
+                        >
+                          ❌ Cancel Reservation
+                        </div>
+                      )
+                    )}
+                  </>
+                );
+              })()}
             </div>
           )}
 
@@ -1625,78 +1790,165 @@ function App() {
 
                 <div className="info-modal-grid">
                   {/* Left Column: Guest Info & Notes */}
-                  <div className="info-section-card">
-                    <h4 className="info-section-title">👤 Guest & Stay Information</h4>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '0.8rem' }}>
-                      <div><strong>Guest:</strong> {selectedBooking.guest_first_name} {selectedBooking.guest_last_name}</div>
-                      <div><strong>Phone:</strong> {selectedBooking.guest_phone}</div>
-                      <div><strong>Email:</strong> {selectedBooking.guest_email || 'N/A'}</div>
-                      <div><strong>Room Category:</strong> {selectedBooking.room_type}</div>
-                      <div><strong>Stay Duration:</strong> {selectedBooking.check_in} to {selectedBooking.check_out}</div>
-                      <div><strong>Check-in Time:</strong> {selectedBooking.check_in_time}</div>
-                      <div><strong>Check-out Time:</strong> {selectedBooking.check_out_time}</div>
-                      <div style={{ marginTop: '4px' }}>
-                        <strong>Status:</strong> <span style={{
-                          padding: '2px 6px',
-                          borderRadius: '4px',
-                          fontSize: '0.7rem',
-                          fontWeight: 'bold',
-                          background: selectedBooking.checked_out
-                            ? 'rgba(239, 68, 68, 0.2)'
-                            : selectedBooking.status === 'Checked_in'
-                            ? 'rgba(34, 197, 94, 0.2)'
-                            : selectedBooking.status === 'Booked'
-                            ? 'rgba(59, 130, 246, 0.2)'
-                            : 'rgba(239, 68, 68, 0.2)',
-                          color: selectedBooking.checked_out
-                            ? '#ef4444'
-                            : selectedBooking.status === 'Checked_in'
-                            ? '#4ade80'
-                            : selectedBooking.status === 'Booked'
-                            ? '#60a5fa'
-                            : '#ef4444'
-                        }}>
-                          {selectedBooking.checked_out
-                            ? 'Checked-Out'
-                            : selectedBooking.status === 'Checked_in'
-                            ? 'Checked-In'
-                            : selectedBooking.status === 'Booked'
-                            ? 'Booked'
-                            : 'Dirty'}
-                        </span>
-                      </div>
-                      <div style={{ marginTop: '4px' }}>
-                        <strong>Cleanliness:</strong> <span style={{
-                          padding: '2px 6px',
-                          borderRadius: '4px',
-                          fontSize: '0.7rem',
-                          fontWeight: 'bold',
-                          background: selectedBooking.status === 'dirty' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(34, 197, 94, 0.2)',
-                          color: selectedBooking.status === 'dirty' ? '#ef4444' : '#4ade80'
-                        }}>
-                          {selectedBooking.status === 'dirty' ? '🧹 Needs Cleaning' : '✨ Cleaned'}
-                        </span>
-                      </div>
-                    </div>
+                  {/* Left Column: Guest Info & Notes */}
+                  {(() => {
+                    const roomCleanliness = (() => {
+                      const r = rooms.find(rm => Number(rm.id) === Number(selectedBooking.room_id));
+                      return r ? r.cleanliness : 'clean';
+                    })();
+                    
+                    return (
+                      <div className="info-section-card">
+                        <h4 className="info-section-title">👤 Guest & Stay Information</h4>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '0.8rem' }}>
+                          <div><strong>Guest:</strong> {selectedBooking.guest_first_name} {selectedBooking.guest_last_name}</div>
+                          <div><strong>Phone:</strong> {selectedBooking.guest_phone}</div>
+                          <div><strong>Email:</strong> {selectedBooking.guest_email || 'N/A'}</div>
+                          <div><strong>Room Category:</strong> {selectedBooking.room_type}</div>
+                          <div><strong>Stay Duration:</strong> {selectedBooking.check_in} to {selectedBooking.check_out}</div>
+                          <div><strong>Check-in Time:</strong> {selectedBooking.check_in_time}</div>
+                          <div><strong>Check-out Time:</strong> {selectedBooking.check_out_time}</div>
+                          <div style={{ marginTop: '4px' }}>
+                            <strong>Status:</strong> <span style={{
+                              padding: '2px 6px',
+                              borderRadius: '4px',
+                              fontSize: '0.7rem',
+                              fontWeight: 'bold',
+                              background: selectedBooking.checked_out
+                                ? 'rgba(239, 68, 68, 0.2)'
+                                : selectedBooking.status === 'Checked_in'
+                                ? 'rgba(34, 197, 94, 0.2)'
+                                : selectedBooking.status === 'Booked'
+                                ? 'rgba(59, 130, 246, 0.2)'
+                                : 'rgba(239, 68, 68, 0.2)',
+                              color: selectedBooking.checked_out
+                                ? '#ef4444'
+                                : selectedBooking.status === 'Checked_in'
+                                ? '#4ade80'
+                                : selectedBooking.status === 'Booked'
+                                ? '#60a5fa'
+                                : '#ef4444'
+                            }}>
+                              {selectedBooking.checked_out
+                                ? 'Checked-Out'
+                                : selectedBooking.status === 'Checked_in'
+                                ? 'Checked-In'
+                                : selectedBooking.status === 'Booked'
+                                ? 'Booked'
+                                : 'Checked-Out'}
+                            </span>
+                          </div>
+                          <div style={{ marginTop: '4px' }}>
+                            <strong>Cleanliness:</strong> <span style={{
+                              padding: '2px 6px',
+                              borderRadius: '4px',
+                              fontSize: '0.7rem',
+                              fontWeight: 'bold',
+                              background: roomCleanliness === 'dirty' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(34, 197, 94, 0.2)',
+                              color: roomCleanliness === 'dirty' ? '#ef4444' : '#4ade80'
+                            }}>
+                              {roomCleanliness === 'dirty' ? '🧹 Needs Cleaning' : '✨ Cleaned'}
+                            </span>
+                          </div>
+                          
+                          {/* KYC Info Section */}
+                          {selectedBooking.kyc && selectedBooking.kyc.kyc_type && (
+                            <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '8px', marginTop: '8px' }}>
+                              <div style={{ fontWeight: 'bold', fontSize: '0.75rem', color: 'var(--primary)', marginBottom: '4px' }}>🆔 Guest KYC Info</div>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                <div><strong>Type:</strong> {selectedBooking.kyc.kyc_type}</div>
+                                <div><strong>Number:</strong> {selectedBooking.kyc.kyc_number || 'N/A'}</div>
+                                <div>
+                                  <strong>KYC Verified:</strong>{' '}
+                                  <span style={{
+                                    padding: '2px 6px',
+                                    borderRadius: '4px',
+                                    fontSize: '0.7rem',
+                                    fontWeight: 'bold',
+                                    background: selectedBooking.kyc.kyc_verified ? 'rgba(34, 197, 94, 0.2)' : 'rgba(245, 158, 11, 0.2)',
+                                    color: selectedBooking.kyc.kyc_verified ? '#4ade80' : '#fbbf24'
+                                  }}>
+                                    {selectedBooking.kyc.kyc_verified ? '✅ Verified' : '⚠️ Pending Verification'}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    className="btn-submit-modal"
+                                    style={{
+                                      marginLeft: '10px',
+                                      padding: '2px 6px',
+                                      fontSize: '0.65rem',
+                                      height: 'auto',
+                                      width: 'auto',
+                                      background: selectedBooking.kyc.kyc_verified ? 'rgba(239, 68, 68, 0.1)' : 'rgba(34, 197, 94, 0.1)',
+                                      borderColor: selectedBooking.kyc.kyc_verified ? 'rgba(239, 68, 68, 0.3)' : 'rgba(34, 197, 94, 0.3)',
+                                      color: selectedBooking.kyc.kyc_verified ? '#ef4444' : '#34d399'
+                                    }}
+                                    onClick={() => handleToggleKYCVerification(selectedBooking.id, !selectedBooking.kyc.kyc_verified)}
+                                  >
+                                    {selectedBooking.kyc.kyc_verified ? 'Mark Unverified' : 'Verify KYC'}
+                                  </button>
+                                </div>
+                                <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                                  {selectedBooking.kyc.kyc_front && (
+                                    <a 
+                                      href={`http://127.0.0.1:8000${selectedBooking.kyc.kyc_front}`} 
+                                      target="_blank" 
+                                      rel="noopener noreferrer"
+                                      style={{ textDecoration: 'none' }}
+                                    >
+                                      <div style={{ border: '1px solid rgba(255,255,255,0.1)', padding: '4px', borderRadius: '4px', textAlign: 'center', background: 'rgba(0,0,0,0.2)' }}>
+                                        <div style={{ fontSize: '0.6rem', color: 'var(--text-secondary)' }}>ID Front</div>
+                                        <img 
+                                          src={`http://127.0.0.1:8000${selectedBooking.kyc.kyc_front}`} 
+                                          alt="KYC Front" 
+                                          style={{ height: '40px', objectFit: 'contain', display: 'block', margin: '4px auto 0' }}
+                                        />
+                                      </div>
+                                    </a>
+                                  )}
+                                  {selectedBooking.kyc.kyc_back && (
+                                    <a 
+                                      href={`http://127.0.0.1:8000${selectedBooking.kyc.kyc_back}`} 
+                                      target="_blank" 
+                                      rel="noopener noreferrer"
+                                      style={{ textDecoration: 'none' }}
+                                    >
+                                      <div style={{ border: '1px solid rgba(255,255,255,0.1)', padding: '4px', borderRadius: '4px', textAlign: 'center', background: 'rgba(0,0,0,0.2)' }}>
+                                        <div style={{ fontSize: '0.6rem', color: 'var(--text-secondary)' }}>ID Back</div>
+                                        <img 
+                                          src={`http://127.0.0.1:8000${selectedBooking.kyc.kyc_back}`} 
+                                          alt="KYC Back" 
+                                          style={{ height: '40px', objectFit: 'contain', display: 'block', margin: '4px auto 0' }}
+                                        />
+                                      </div>
+                                    </a>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
 
-                    <div style={{ marginTop: '1rem' }}>
-                      <h4 className="info-section-title">📝 Special Notes & Requests</h4>
-                      <textarea
-                        className="notes-textarea"
-                        placeholder="Add booking notes, preferences, or issues..."
-                        value={notesText}
-                        onChange={e => setNotesText(e.target.value)}
-                      />
-                      <button 
-                        type="button" 
-                        className="btn-submit-modal" 
-                        style={{ marginTop: '8px', width: 'auto', fontSize: '0.75rem', padding: '6px 12px' }}
-                        onClick={handleSaveNotes}
-                      >
-                        💾 Save Notes
-                      </button>
-                    </div>
-                  </div>
+                        <div style={{ marginTop: '1rem' }}>
+                          <h4 className="info-section-title">📝 Special Notes & Requests</h4>
+                          <textarea
+                            className="notes-textarea"
+                            placeholder="Add booking notes, preferences, or issues..."
+                            value={notesText}
+                            onChange={e => setNotesText(e.target.value)}
+                          />
+                          <button 
+                            type="button" 
+                            className="btn-submit-modal" 
+                            style={{ marginTop: '8px', width: 'auto', fontSize: '0.75rem', padding: '6px 12px' }}
+                            onClick={handleSaveNotes}
+                          >
+                            💾 Save Notes
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* Right Column: Billing & Transactions */}
                   <div className="info-section-card">
@@ -1770,8 +2022,7 @@ function App() {
                             <label style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '2px' }}>Amount to Pay (Room Tariff)</label>
                             <input
                               type="number"
-                              className="input-control"
-                              style={{ height: '30px', fontSize: '0.75rem', padding: '4px', width: '100%' }}
+                              className="input-control-small"
                               placeholder="Amount to Pay (₹)"
                               value={amountToPayInput}
                               onChange={e => setAmountToPayInput(e.target.value)}
@@ -1781,8 +2032,7 @@ function App() {
                             <label style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '2px' }}>Extra / Incidentals Charge</label>
                             <input
                               type="number"
-                              className="input-control"
-                              style={{ height: '30px', fontSize: '0.75rem', padding: '4px', width: '100%' }}
+                              className="input-control-small"
                               placeholder="Extra Amount (₹)"
                               value={extraAmountInput}
                               onChange={e => setExtraAmountInput(e.target.value)}
@@ -1794,8 +2044,7 @@ function App() {
                           <div>
                             <label style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '2px' }}>Payment Method</label>
                             <select
-                              className="input-control"
-                              style={{ height: '30px', fontSize: '0.75rem', padding: '4px', background: '#0f172a', width: '100%' }}
+                              className="input-control-small"
                               value={paymentMethod}
                               onChange={e => setPaymentMethod(e.target.value)}
                             >
@@ -1808,8 +2057,7 @@ function App() {
                             <label style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '2px' }}>Receipt/Txn ID (Optional)</label>
                             <input
                               type="text"
-                              className="input-control"
-                              style={{ height: '30px', fontSize: '0.75rem', padding: '4px', width: '100%' }}
+                              className="input-control-small"
                               placeholder="XXX-XXX"
                               value={paymentReceiptId}
                               onChange={e => setPaymentReceiptId(e.target.value)}
@@ -1838,72 +2086,79 @@ function App() {
                 </div>
 
                 <div className="modal-actions" style={{ justifyContent: 'space-between', display: 'flex', width: '100%', borderTop: '1px solid rgba(255, 255, 255, 0.05)', paddingTop: '12px', marginTop: '12px' }}>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    {!selectedBooking.checked_out && (selectedBooking.status === 'Booked' || selectedBooking.status === 'dirty') && (
-                      <button 
-                        type="button" 
-                        className="btn-submit-modal" 
-                        style={{ background: 'rgba(34, 197, 94, 0.1)', borderColor: 'rgba(34, 197, 94, 0.3)', color: '#4ade80' }}
-                        onClick={() => handleCheckIn(selectedBooking.id)}
-                      >
-                        🟢 Check In
-                      </button>
-                    )}
-                    {!selectedBooking.checked_out && (selectedBooking.status === 'Checked_in' || selectedBooking.status === 'dirty') && (
-                      <button 
-                        type="button" 
-                        className="btn-submit-modal" 
-                        style={{ background: 'rgba(167, 139, 250, 0.1)', borderColor: 'rgba(167, 139, 250, 0.3)', color: '#c084fc' }}
-                        onClick={() => {
-                          setCheckoutPaymentMethod('Cash');
-                          setCheckoutReceiptId('');
-                          setCheckoutModalOpen(true);
-                        }}
-                      >
-                        🚪 Check Out
-                      </button>
-                    )}
-                    {selectedBooking.status === 'dirty' && (
-                      <button 
-                        type="button" 
-                        className="btn-submit-modal" 
-                        style={{ background: 'rgba(34, 197, 94, 0.1)', borderColor: 'rgba(34, 197, 94, 0.3)', color: '#22c55e' }}
-                        onClick={() => {
-                          handleCloseInfoModal();
-                          handleQuickMarkCleaned(selectedBooking.id);
-                        }}
-                      >
-                        🧹 Mark as Cleaned
-                      </button>
-                    )}
-                    {!selectedBooking.checked_out && selectedBooking.status !== 'dirty' && (
-                      <button 
-                        type="button" 
-                        className="btn-cancel" 
-                        style={{ background: 'rgba(239, 68, 68, 0.1)', borderColor: 'rgba(239, 68, 68, 0.3)', color: '#ef4444' }}
-                        onClick={() => {
-                          setCancelRefundAmount(selectedBooking.advance_paid);
-                          setCancelPaymentMethod('Cash');
-                          setCancelModalOpen(true);
-                        }}
-                      >
-                        ❌ Cancel Reservation
-                      </button>
-                    )}
+                  {(() => {
+                    const currentRoomObj = rooms.find(r => Number(r.id) === Number(selectedBooking.room_id));
+                    const roomIsDirty = currentRoomObj && currentRoomObj.cleanliness === 'dirty';
                     
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: '12px', borderLeft: '1px solid rgba(255, 255, 255, 0.1)', paddingLeft: '12px' }}>
-                      <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Room Cleanliness:</span>
-                      <select
-                        className="input-control"
-                        style={{ height: '30px', fontSize: '0.75rem', padding: '4px 8px', background: '#0f172a', width: '185px', color: '#fff', borderColor: 'rgba(255,255,255,0.15)', cursor: 'pointer' }}
-                        value={selectedBooking.status === 'dirty' ? 'dirty' : 'clean'}
-                        onChange={e => handleUpdateCleanliness(e.target.value)}
-                      >
-                        <option value="clean">🧼 Clean</option>
-                        <option value="dirty">🧹 Dirty (Needs Cleaning)</option>
-                      </select>
-                    </div>
-                  </div>
+                    return (
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        {!selectedBooking.checked_out && selectedBooking.status === 'Booked' && (
+                          <button 
+                            type="button" 
+                            className="btn-submit-modal" 
+                            style={{ background: 'rgba(34, 197, 94, 0.1)', borderColor: 'rgba(34, 197, 94, 0.3)', color: '#4ade80' }}
+                            onClick={() => handleCheckIn(selectedBooking.id)}
+                          >
+                            🟢 Check In
+                          </button>
+                        )}
+                        {!selectedBooking.checked_out && selectedBooking.status === 'Checked_in' && (
+                          <button 
+                            type="button" 
+                            className="btn-submit-modal" 
+                            style={{ background: 'rgba(167, 139, 250, 0.1)', borderColor: 'rgba(167, 139, 250, 0.3)', color: '#c084fc' }}
+                            onClick={() => {
+                              setCheckoutPaymentMethod('Cash');
+                              setCheckoutReceiptId('');
+                              setCheckoutModalOpen(true);
+                            }}
+                          >
+                            🚪 Check Out
+                          </button>
+                        )}
+                        {roomIsDirty && (
+                          <button 
+                            type="button" 
+                            className="btn-submit-modal" 
+                            style={{ background: 'rgba(34, 197, 94, 0.1)', borderColor: 'rgba(34, 197, 94, 0.3)', color: '#22c55e' }}
+                            onClick={() => {
+                              handleCloseInfoModal();
+                              handleQuickMarkCleaned(selectedBooking.id);
+                            }}
+                          >
+                            🧹 Mark as Cleaned
+                          </button>
+                        )}
+                        {!selectedBooking.checked_out && (
+                          <button 
+                            type="button" 
+                            className="btn-cancel" 
+                            style={{ background: 'rgba(239, 68, 68, 0.1)', borderColor: 'rgba(239, 68, 68, 0.3)', color: '#ef4444' }}
+                            onClick={() => {
+                              setCancelRefundAmount(selectedBooking.advance_paid);
+                              setCancelPaymentMethod('Cash');
+                              setCancelModalOpen(true);
+                            }}
+                          >
+                            ❌ Cancel Reservation
+                          </button>
+                        )}
+                        
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: '12px', borderLeft: '1px solid rgba(255, 255, 255, 0.1)', paddingLeft: '12px' }}>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Room Cleanliness:</span>
+                          <select
+                            className="input-control-small"
+                            style={{ width: '185px' }}
+                            value={roomIsDirty ? 'dirty' : 'clean'}
+                            onChange={e => handleUpdateCleanliness(e.target.value)}
+                          >
+                            <option value="clean">🧼 Clean</option>
+                            <option value="dirty">🧹 Dirty (Needs Cleaning)</option>
+                          </select>
+                        </div>
+                      </div>
+                    );
+                  })()}
                   <div style={{ display: 'flex', gap: '8px' }}>
                     {!selectedBooking.checked_out && (
                       <button type="button" className="btn-submit-modal" onClick={() => {

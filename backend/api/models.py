@@ -38,19 +38,32 @@ class Room(models.Model):
     def __str__(self):
         return f"{self.number} ({self.room_type.name}) - {self.hotel.name} - Cleanliness: {self.cleanliness}"
 
+class Customer(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='customer_profile')
+    phone = models.CharField(max_length=20, unique=True)
+    kyc_type = models.CharField(max_length=50, blank=True, null=True)
+    kyc_number = models.CharField(max_length=50, blank=True, null=True)
+    kyc_front = models.FileField(upload_to='kyc/', blank=True, null=True)
+    kyc_back = models.FileField(upload_to='kyc/', blank=True, null=True)
+    kyc_verified = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"{self.user.first_name} {self.user.last_name} ({self.phone})"
+
 class Booking(models.Model):
     STATUS_CHOICES = [
         ('Booked', 'Booked'),
         ('Checked_in', 'Checked_in'),
-        ('dirty', 'dirty'),
+        ('Checked_out', 'Checked_out'),
     ]
     room = models.ForeignKey(Room, on_delete=models.CASCADE, related_name='bookings')
+    customer = models.ForeignKey(Customer, on_delete=models.SET_NULL, related_name='bookings', null=True, blank=True)
     guest_first_name = models.CharField(max_length=100)
     guest_last_name = models.CharField(max_length=100)
     guest_phone = models.CharField(max_length=20)
     guest_email = models.EmailField(blank=True, null=True)
-    check_in = models.DateTimeField()
-    check_out = models.DateTimeField()
+    check_in = models.DateField()
+    check_out = models.DateField()
     status = models.CharField(max_length=50, choices=STATUS_CHOICES, default='Booked')
     notes = models.TextField(blank=True, default='')
     extra_charges = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))

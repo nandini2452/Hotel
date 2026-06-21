@@ -167,11 +167,8 @@ def my_hotel_bookings(request):
         bookings = Booking.objects.filter(room__hotel=hotel)
         data = []
         for b in bookings:
-            local_in = timezone.localtime(b.check_in)
-            local_out = timezone.localtime(b.check_out)
-            
             # Calculate total nights and cost
-            nights = (b.check_out.date() - b.check_in.date()).days
+            nights = (b.check_out - b.check_in).days
             nights = max(1, nights)
             total_cost = (nights * b.room.room_type.price) + b.extra_charges
             
@@ -189,6 +186,16 @@ def my_hotel_bookings(request):
             outstanding_amount = total_cost - total_paid
             advance_status_val = 'Paid' if total_paid > 0 else 'Unpaid'
 
+            kyc_data = {}
+            if b.customer:
+                kyc_data = {
+                    "kyc_type": b.customer.kyc_type,
+                    "kyc_number": b.customer.kyc_number,
+                    "kyc_front": b.customer.kyc_front.url if b.customer.kyc_front else None,
+                    "kyc_back": b.customer.kyc_back.url if b.customer.kyc_back else None,
+                    "kyc_verified": b.customer.kyc_verified,
+                }
+
             data.append({
                 "id": b.id,
                 "room_id": b.room.id,
@@ -198,10 +205,10 @@ def my_hotel_bookings(request):
                 "guest_last_name": b.guest_last_name,
                 "guest_phone": b.guest_phone,
                 "guest_email": b.guest_email,
-                "check_in": local_in.strftime('%Y-%m-%d'),
-                "check_in_time": local_in.strftime('%I:%M %p'),
-                "check_out": local_out.strftime('%Y-%m-%d'),
-                "check_out_time": local_out.strftime('%I:%M %p'),
+                "check_in": b.check_in.strftime('%Y-%m-%d'),
+                "check_in_time": "11:30 AM",
+                "check_out": b.check_out.strftime('%Y-%m-%d'),
+                "check_out_time": "11:30 AM",
                 "status": b.status,
                 "checked_out": b.checked_out,
                 "notes": b.notes,
@@ -210,21 +217,19 @@ def my_hotel_bookings(request):
                 "advance_paid": total_paid,
                 "advance_status": advance_status_val,
                 "outstanding_amount": outstanding_amount,
-                "transactions": txns_data
+                "transactions": txns_data,
+                "kyc": kyc_data
             })
         return Response(data, status=status.HTTP_200_OK)
 
     elif request.method == 'POST':
-        # Add a quick reservation
         room_id = request.data.get('room_id')
         guest_first_name = request.data.get('guest_first_name')
         guest_last_name = request.data.get('guest_last_name')
         guest_phone = request.data.get('guest_phone')
         guest_email = request.data.get('guest_email')
         check_in = request.data.get('check_in')
-        check_in_time = '11:30 AM'
         check_out = request.data.get('check_out')
-        check_out_time = '11:30 AM'
         status_val = request.data.get('status', 'Booked')
         advance_paid = request.data.get('advance_paid', 0.00)
         advance_status_val = request.data.get('advance_status', 'Paid')
@@ -251,18 +256,17 @@ def my_hotel_bookings(request):
         if not (is_owner or is_manager):
             return Response({"detail": "Not authorized for this hotel."}, status=status.HTTP_403_FORBIDDEN)
 
-        # Parse check-in/check-out date strings & times
+        # Parse check-in/check-out date strings
         try:
-            check_in_dt = combine_datetime(check_in, check_in_time)
-            check_out_dt = combine_datetime(check_out, check_out_time)
+            check_in_date = datetime.datetime.strptime(check_in, "%Y-%m-%d").date()
+            check_out_date = datetime.datetime.strptime(check_out, "%Y-%m-%d").date()
         except ValueError:
-            return Response({"detail": "Invalid check-in or check-out date/time format. Use YYYY-MM-DD and hh:mm AM/PM."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": "Invalid check-in or check-out date format. Use YYYY-MM-DD."}, status=status.HTTP_400_BAD_REQUEST)
 
-        if check_in_dt >= check_out_dt:
-            return Response({"detail": "Check-out date/time must be after check-in date/time."}, status=status.HTTP_400_BAD_REQUEST)
+        if check_in_date >= check_out_date:
+            return Response({"detail": "Check-out date must be after check-in date."}, status=status.HTTP_400_BAD_REQUEST)
 
         # Validate advance paid
-        # Standard: 500, Deluxe: 1000, Superior: 2000
         room_type_name = room.room_type.name
         min_advance = 0.00
         if room_type_name == 'Standard':
@@ -286,27 +290,80 @@ def my_hotel_bookings(request):
         # Check for booking overlaps
         overlapping_bookings = Booking.objects.filter(
             room=room,
-            check_in__lt=check_out_dt,
-            check_out__gt=check_in_dt
-        )
+            check_in__lt=check_out_date,
+            check_out__gt=check_in_date
+        ).exclude(status='Checked_out')
         if overlapping_bookings.exists():
             return Response({"detail": "This room is already booked for the selected dates."}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Get or create customer and user
+        from .models import Customer
+        customer = Customer.objects.filter(phone=guest_phone).first()
+        if not customer:
+            username = guest_phone
+            user_record = User.objects.filter(username=username).first()
+            if not user_record:
+                user_record = User.objects.create_user(
+                    username=username,
+                    password=guest_phone + '123',
+                    first_name=guest_first_name,
+                    last_name=guest_last_name,
+                    email=guest_email if guest_email else ''
+                )
+            customer = Customer.objects.create(
+                user=user_record,
+                phone=guest_phone,
+                kyc_type=request.data.get('kyc_type'),
+                kyc_number=request.data.get('kyc_number'),
+                kyc_front=request.FILES.get('kyc_front'),
+                kyc_back=request.FILES.get('kyc_back'),
+            )
+        else:
+            # Update existing customer/user fields if supplied
+            kyc_type = request.data.get('kyc_type')
+            kyc_number = request.data.get('kyc_number')
+            kyc_front = request.FILES.get('kyc_front')
+            kyc_back = request.FILES.get('kyc_back')
+            if kyc_type:
+                customer.kyc_type = kyc_type
+            if kyc_number:
+                customer.kyc_number = kyc_number
+            if kyc_front:
+                customer.kyc_front = kyc_front
+            if kyc_back:
+                customer.kyc_back = kyc_back
+            
+            customer.user.first_name = guest_first_name
+            customer.user.last_name = guest_last_name
+            if guest_email:
+                customer.user.email = guest_email
+            customer.user.save()
+            customer.save()
+
+        # Handle backward compatible status name "dirty"
+        if status_val == 'dirty' or status_val == 'Checked_out':
+            actual_status = 'Checked_out'
+            checked_out_bool = True
+            room.cleanliness = 'dirty'
+        else:
+            actual_status = status_val
+            checked_out_bool = False
+            room.cleanliness = 'clean'
+        room.save()
+
         booking = Booking.objects.create(
             room=room,
+            customer=customer,
             guest_first_name=guest_first_name,
             guest_last_name=guest_last_name,
             guest_phone=guest_phone,
             guest_email=guest_email,
-            check_in=check_in_dt,
-            check_out=check_out_dt,
-            status=status_val,
+            check_in=check_in_date,
+            check_out=check_out_date,
+            status=actual_status,
+            checked_out=checked_out_bool,
             notes=notes
         )
-
-        # Sync room cleanliness to clean on new booking creation
-        room.cleanliness = 'clean'
-        room.save()
 
         # Create corresponding advance transaction if any payment was recorded
         if advance_paid_dec > 0:
@@ -317,10 +374,7 @@ def my_hotel_bookings(request):
                 receipt_id=receipt_id if receipt_id else None
             )
 
-        local_in = timezone.localtime(booking.check_in)
-        local_out = timezone.localtime(booking.check_out)
-        
-        nights = (booking.check_out.date() - booking.check_in.date()).days
+        nights = (booking.check_out - booking.check_in).days
         nights = max(1, nights)
         total_cost = (nights * booking.room.room_type.price) + booking.extra_charges
         
@@ -337,6 +391,14 @@ def my_hotel_bookings(request):
         outstanding_amount = total_cost - total_paid
         actual_advance_status = 'Paid' if total_paid > 0 else 'Unpaid'
 
+        kyc_data = {
+            "kyc_type": customer.kyc_type,
+            "kyc_number": customer.kyc_number,
+            "kyc_front": customer.kyc_front.url if customer.kyc_front else None,
+            "kyc_back": customer.kyc_back.url if customer.kyc_back else None,
+            "kyc_verified": customer.kyc_verified,
+        }
+
         return Response({
             "id": booking.id,
             "room_id": booking.room.id,
@@ -346,10 +408,10 @@ def my_hotel_bookings(request):
             "guest_last_name": booking.guest_last_name,
             "guest_phone": booking.guest_phone,
             "guest_email": booking.guest_email,
-            "check_in": local_in.strftime('%Y-%m-%d'),
-            "check_in_time": local_in.strftime('%I:%M %p'),
-            "check_out": local_out.strftime('%Y-%m-%d'),
-            "check_out_time": local_out.strftime('%I:%M %p'),
+            "check_in": booking.check_in.strftime('%Y-%m-%d'),
+            "check_in_time": "11:30 AM",
+            "check_out": booking.check_out.strftime('%Y-%m-%d'),
+            "check_out_time": "11:30 AM",
             "status": booking.status,
             "checked_out": booking.checked_out,
             "notes": booking.notes,
@@ -358,7 +420,8 @@ def my_hotel_bookings(request):
             "advance_paid": total_paid,
             "advance_status": actual_advance_status,
             "outstanding_amount": outstanding_amount,
-            "transactions": txns_data
+            "transactions": txns_data,
+            "kyc": kyc_data
         }, status=status.HTTP_201_CREATED)
 
 @api_view(['PUT', 'DELETE'])
@@ -385,13 +448,18 @@ def my_hotel_booking_detail(request, pk):
         guest_phone = request.data.get('guest_phone')
         guest_email = request.data.get('guest_email')
         check_in = request.data.get('check_in')
-        check_in_time = '11:30 AM'
         check_out = request.data.get('check_out')
-        check_out_time = '11:30 AM'
         status_val = request.data.get('status')
         checked_out_val = request.data.get('checked_out')
         notes = request.data.get('notes')
         extra_charges = request.data.get('extra_charges')
+
+        # KYC details
+        kyc_type = request.data.get('kyc_type')
+        kyc_number = request.data.get('kyc_number')
+        kyc_front = request.FILES.get('kyc_front')
+        kyc_back = request.FILES.get('kyc_back')
+        kyc_verified_val = request.data.get('kyc_verified')
 
         if guest_phone:
             if not (len(guest_phone) == 10 and guest_phone.isdigit()):
@@ -404,16 +472,6 @@ def my_hotel_booking_detail(request, pk):
             booking.guest_last_name = guest_last_name
         if guest_email is not None:
             booking.guest_email = guest_email
-        if status_val:
-            booking.status = status_val
-            if status_val == 'dirty':
-                booking.room.cleanliness = 'dirty'
-                booking.room.save()
-            elif status_val in ['Checked_in', 'Booked']:
-                booking.room.cleanliness = 'clean'
-                booking.room.save()
-        if checked_out_val is not None:
-            booking.checked_out = checked_out_val
         if notes is not None:
             booking.notes = notes
         if extra_charges is not None:
@@ -422,42 +480,99 @@ def my_hotel_booking_detail(request, pk):
             except (ValueError, TypeError):
                 return Response({"detail": "Extra charges must be a number."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Get local versions to combine if check_in/check_out or times are updated
-        local_in = timezone.localtime(booking.check_in)
-        local_out = timezone.localtime(booking.check_out)
+        # Get or create customer if it doesn't exist on this booking
+        if booking.guest_phone:
+            from .models import Customer
+            customer = booking.customer
+            if not customer:
+                customer = Customer.objects.filter(phone=booking.guest_phone).first()
+                if not customer:
+                    username = booking.guest_phone
+                    user_record = User.objects.filter(username=username).first()
+                    if not user_record:
+                        user_record = User.objects.create_user(
+                            username=username,
+                            password=booking.guest_phone + '123',
+                            first_name=booking.guest_first_name,
+                            last_name=booking.guest_last_name,
+                            email=booking.guest_email if booking.guest_email else ''
+                        )
+                    customer = Customer.objects.create(
+                        user=user_record,
+                        phone=booking.guest_phone
+                    )
+                booking.customer = customer
 
-        cin_date_str = check_in or local_in.strftime('%Y-%m-%d')
-        cin_time_str = check_in_time
-        cout_date_str = check_out or local_out.strftime('%Y-%m-%d')
-        cout_time_str = check_out_time
+            if customer:
+                if kyc_type:
+                    customer.kyc_type = kyc_type
+                if kyc_number:
+                    customer.kyc_number = kyc_number
+                if kyc_front:
+                    customer.kyc_front = kyc_front
+                if kyc_back:
+                    customer.kyc_back = kyc_back
+                if kyc_verified_val is not None:
+                    customer.kyc_verified = (str(kyc_verified_val).lower() == 'true')
+                
+                customer.user.first_name = booking.guest_first_name
+                customer.user.last_name = booking.guest_last_name
+                if booking.guest_email:
+                    customer.user.email = booking.guest_email
+                customer.user.save()
+                customer.save()
+
+        # Handle check-in and check-out dates
+        cin_date_str = check_in or booking.check_in.strftime('%Y-%m-%d')
+        cout_date_str = check_out or booking.check_out.strftime('%Y-%m-%d')
 
         try:
-            check_in_dt = combine_datetime(cin_date_str, cin_time_str)
-            check_out_dt = combine_datetime(cout_date_str, cout_time_str)
+            check_in_date = datetime.datetime.strptime(cin_date_str, "%Y-%m-%d").date()
+            check_out_date = datetime.datetime.strptime(cout_date_str, "%Y-%m-%d").date()
         except ValueError:
-            return Response({"detail": "Invalid date or time format."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": "Invalid date format."}, status=status.HTTP_400_BAD_REQUEST)
 
-        if check_in_dt >= check_out_dt:
-            return Response({"detail": "Check-out date/time must be after check-in date/time."}, status=status.HTTP_400_BAD_REQUEST)
+        if check_in_date >= check_out_date:
+            return Response({"detail": "Check-out date must be after check-in date."}, status=status.HTTP_400_BAD_REQUEST)
 
         overlapping_bookings = Booking.objects.filter(
             room=booking.room,
-            check_in__lt=check_out_dt,
-            check_out__gt=check_in_dt
-        ).exclude(id=booking.id)
+            check_in__lt=check_out_date,
+            check_out__gt=check_in_date
+        ).exclude(id=booking.id).exclude(status='Checked_out')
 
         if overlapping_bookings.exists():
             return Response({"detail": "This room is already booked for the selected dates."}, status=status.HTTP_400_BAD_REQUEST)
 
-        booking.check_in = check_in_dt
-        booking.check_out = check_out_dt
+        booking.check_in = check_in_date
+        booking.check_out = check_out_date
+
+        if status_val:
+            if status_val == 'dirty' or status_val == 'Checked_out':
+                booking.status = 'Checked_out'
+                booking.checked_out = True
+                booking.room.cleanliness = 'dirty'
+                booking.room.save()
+            else:
+                if booking.status == 'Checked_out':
+                    # Cleaning room shouldn't undo checkout!
+                    booking.room.cleanliness = 'clean'
+                    booking.room.save()
+                else:
+                    booking.status = status_val
+                    booking.room.cleanliness = 'clean'
+                    booking.room.save()
+
+        if checked_out_val is not None:
+            booking.checked_out = checked_out_val
+            if checked_out_val:
+                booking.status = 'Checked_out'
+                booking.room.cleanliness = 'dirty'
+                booking.room.save()
+
         booking.save()
 
-        # Re-fetch calculations
-        local_in_new = timezone.localtime(booking.check_in)
-        local_out_new = timezone.localtime(booking.check_out)
-        
-        nights = (booking.check_out.date() - booking.check_in.date()).days
+        nights = (booking.check_out - booking.check_in).days
         nights = max(1, nights)
         total_cost = (nights * booking.room.room_type.price) + booking.extra_charges
         
@@ -474,6 +589,16 @@ def my_hotel_booking_detail(request, pk):
         outstanding_amount = total_cost - total_paid
         actual_advance_status = 'Paid' if total_paid > 0 else 'Unpaid'
 
+        kyc_data = {}
+        if booking.customer:
+            kyc_data = {
+                "kyc_type": booking.customer.kyc_type,
+                "kyc_number": booking.customer.kyc_number,
+                "kyc_front": booking.customer.kyc_front.url if booking.customer.kyc_front else None,
+                "kyc_back": booking.customer.kyc_back.url if booking.customer.kyc_back else None,
+                "kyc_verified": booking.customer.kyc_verified,
+            }
+
         return Response({
             "id": booking.id,
             "room_id": booking.room.id,
@@ -483,10 +608,10 @@ def my_hotel_booking_detail(request, pk):
             "guest_last_name": booking.guest_last_name,
             "guest_phone": booking.guest_phone,
             "guest_email": booking.guest_email,
-            "check_in": local_in_new.strftime('%Y-%m-%d'),
-            "check_in_time": local_in_new.strftime('%I:%M %p'),
-            "check_out": local_out_new.strftime('%Y-%m-%d'),
-            "check_out_time": local_out_new.strftime('%I:%M %p'),
+            "check_in": booking.check_in.strftime('%Y-%m-%d'),
+            "check_in_time": "11:30 AM",
+            "check_out": booking.check_out.strftime('%Y-%m-%d'),
+            "check_out_time": "11:30 AM",
             "status": booking.status,
             "checked_out": booking.checked_out,
             "notes": booking.notes,
@@ -495,7 +620,8 @@ def my_hotel_booking_detail(request, pk):
             "advance_paid": total_paid,
             "advance_status": actual_advance_status,
             "outstanding_amount": outstanding_amount,
-            "transactions": txns_data
+            "transactions": txns_data,
+            "kyc": kyc_data
         }, status=status.HTTP_200_OK)
 
     elif request.method == 'DELETE':
@@ -541,10 +667,7 @@ def create_transaction(request, pk):
     )
 
     # Return the updated booking details
-    local_in = timezone.localtime(booking.check_in)
-    local_out = timezone.localtime(booking.check_out)
-    
-    nights = (booking.check_out.date() - booking.check_in.date()).days
+    nights = (booking.check_out - booking.check_in).days
     nights = max(1, nights)
     total_cost = (nights * booking.room.room_type.price) + booking.extra_charges
     
@@ -561,6 +684,16 @@ def create_transaction(request, pk):
     outstanding_amount = total_cost - total_paid
     actual_advance_status = 'Paid' if total_paid > 0 else 'Unpaid'
 
+    kyc_data = {}
+    if booking.customer:
+        kyc_data = {
+            "kyc_type": booking.customer.kyc_type,
+            "kyc_number": booking.customer.kyc_number,
+            "kyc_front": booking.customer.kyc_front.url if booking.customer.kyc_front else None,
+            "kyc_back": booking.customer.kyc_back.url if booking.customer.kyc_back else None,
+            "kyc_verified": booking.customer.kyc_verified,
+        }
+
     return Response({
         "id": booking.id,
         "room_id": booking.room.id,
@@ -570,18 +703,20 @@ def create_transaction(request, pk):
         "guest_last_name": booking.guest_last_name,
         "guest_phone": booking.guest_phone,
         "guest_email": booking.guest_email,
-        "check_in": local_in.strftime('%Y-%m-%d'),
-        "check_in_time": local_in.strftime('%I:%M %p'),
-        "check_out": local_out.strftime('%Y-%m-%d'),
-        "check_out_time": local_out.strftime('%I:%M %p'),
+        "check_in": booking.check_in.strftime('%Y-%m-%d'),
+        "check_in_time": "11:30 AM",
+        "check_out": booking.check_out.strftime('%Y-%m-%d'),
+        "check_out_time": "11:30 AM",
         "status": booking.status,
+        "checked_out": booking.checked_out,
         "notes": booking.notes,
         "extra_charges": booking.extra_charges,
         "total_cost": total_cost,
         "advance_paid": total_paid,
         "advance_status": actual_advance_status,
         "outstanding_amount": outstanding_amount,
-        "transactions": txns_data
+        "transactions": txns_data,
+        "kyc": kyc_data
     }, status=status.HTTP_201_CREATED)
 
 @api_view(['PUT'])
@@ -608,20 +743,6 @@ def update_room_cleanliness(request, pk):
 
     room.cleanliness = cleanliness
     room.save()
-
-    # Automatically sync today's active booking status if present
-    today = timezone.localtime(timezone.now()).date()
-    active_booking = Booking.objects.filter(
-        room=room,
-        check_in__date__lte=today,
-        check_out__date__gt=today
-    ).first()
-    if active_booking:
-        if cleanliness == 'dirty':
-            active_booking.status = 'dirty'
-        else:
-            active_booking.status = 'Checked_in'
-        active_booking.save()
 
     return Response({
         "id": room.id,
