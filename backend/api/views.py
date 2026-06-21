@@ -43,11 +43,10 @@ def login_view(request):
     if user is None:
         return Response({"detail": "Invalid username or password."}, status=status.HTTP_400_BAD_REQUEST)
 
-    # 2. Get hotel by code
-    try:
-        hotel = Hotel.objects.get(code=hotel_code)
-    except Hotel.DoesNotExist:
-        return Response({"detail": "Hotel with the specified code does not exist."}, status=status.HTTP_404_NOT_FOUND)
+    # 2. Get hotel by code or name
+    hotel = Hotel.objects.filter(Q(code__iexact=hotel_code) | Q(name__iexact=hotel_code)).first()
+    if not hotel:
+        return Response({"detail": "Hotel with the specified code or name does not exist."}, status=status.HTTP_404_NOT_FOUND)
 
     # 3. Check if user is owner or manager of that hotel
     is_owner = hotel.owner == user

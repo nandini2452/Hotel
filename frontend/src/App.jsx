@@ -6,8 +6,7 @@ const TIME_OPTIONS = [
 ];
 
 function App() {
-  const [hotels, setHotels] = useState([]);
-  const [selectedHotel, setSelectedHotel] = useState(null);
+  const [hotelCodeInput, setHotelCodeInput] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   
@@ -61,7 +60,6 @@ function App() {
   // Toast notifications state
   const [toasts, setToasts] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [fetchError, setFetchError] = useState(false);
 
   // Context Menu and Info Modal states
   const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0, booking: null });
@@ -121,27 +119,7 @@ function App() {
     return `REC-${result}`;
   };
 
-  // Fetch hotels list on mount
-  useEffect(() => {
-    fetch('http://127.0.0.1:8000/api/hotels/')
-      .then(res => {
-        if (!res.ok) throw new Error('Failed to fetch hotels');
-        return res.json();
-      })
-      .then(data => {
-        setHotels(data);
-        setFetchError(false);
-      })
-      .catch(err => {
-        console.error('Fetch error:', err);
-        setFetchError(true);
-        // Fallback static data if backend is offline
-        setHotels([
-          { id: 4, name: 'Abhirami Hotel', code: 'ABH01' },
-          { id: 5, name: 'Abhirami Lodge', code: 'ABL02' }
-        ]);
-      });
-  }, []);
+
 
   // Fetch rooms and bookings when authenticated
   useEffect(() => {
@@ -208,8 +186,8 @@ function App() {
       triggerToast('Please enter both username and password.');
       return;
     }
-    if (!selectedHotel) {
-      triggerToast('Please select a hotel to check in.');
+    if (!hotelCodeInput) {
+      triggerToast('Please enter a hotel code.');
       return;
     }
 
@@ -223,7 +201,7 @@ function App() {
       body: JSON.stringify({
         username: username,
         password: password,
-        hotel_code: selectedHotel.code
+        hotel_code: hotelCodeInput.trim()
       })
     })
       .then(async res => {
@@ -266,7 +244,7 @@ function App() {
     setLoggedInUser('');
     setHotelCode('');
     setHotelName('');
-    setSelectedHotel(null);
+    setHotelCodeInput('');
     setRooms([]);
     setBookings([]);
   };
@@ -296,7 +274,7 @@ function App() {
       advance_paid: room.min_advance,
       advance_status: 'Paid',
       payment_method: 'Cash',
-      receipt_id: generateReceiptId()
+      receipt_id: ''
     });
     setModalOpen(true);
   };
@@ -324,7 +302,7 @@ function App() {
       advance_paid: booking.advance_paid,
       advance_status: booking.advance_status || 'Paid',
       payment_method: 'Cash',
-      receipt_id: booking.transactions && booking.transactions.length > 0 ? (booking.transactions[0].receipt_id || '') : generateReceiptId()
+      receipt_id: booking.transactions && booking.transactions.length > 0 ? (booking.transactions[0].receipt_id || '') : ''
     });
     setModalOpen(true);
   };
@@ -334,7 +312,7 @@ function App() {
     setNotesText(booking.notes || '');
     setAmountToPayInput(booking.outstanding_amount.toString());
     setExtraAmountInput('0');
-    setPaymentReceiptId(generateReceiptId());
+    setPaymentReceiptId('');
     setInfoModalOpen(true);
   };
 
@@ -454,7 +432,7 @@ function App() {
 
       triggerToast(`Successfully processed payment of ₹${totalToPay.toLocaleString('en-IN')}!`);
       setExtraAmountInput('0');
-      setPaymentReceiptId(generateReceiptId());
+      setPaymentReceiptId('');
       setSelectedBooking(finalBooking);
       setAmountToPayInput(finalBooking.outstanding_amount.toString());
       setBookings(prev => prev.map(b => b.id === finalBooking.id ? finalBooking : b));
@@ -1052,14 +1030,29 @@ function App() {
                       gap: '4px', 
                       padding: '2px 4px', 
                       borderRadius: '4px', 
-                      background: booking.status === 'dirty' 
-                        ? 'rgba(239, 68, 68, 0.2)' 
-                        : 'rgba(34, 197, 94, 0.2)' 
+                      background: booking.checked_out
+                        ? 'rgba(239, 68, 68, 0.2)'
+                        : booking.status === 'Checked_in'
+                        ? 'rgba(34, 197, 94, 0.2)'
+                        : booking.status === 'Booked'
+                        ? 'rgba(59, 130, 246, 0.2)'
+                        : 'rgba(239, 68, 68, 0.2)',
+                      color: booking.checked_out
+                        ? '#ef4444'
+                        : booking.status === 'Checked_in'
+                        ? '#4ade80'
+                        : booking.status === 'Booked'
+                        ? '#60a5fa'
+                        : '#ef4444'
                     }}
                   >
-                    {booking.status === 'dirty' 
-                      ? '🧹 Needs Cleaning' 
-                      : '✨ Cleaned'}
+                    {booking.checked_out
+                      ? '🚪 Checked-Out'
+                      : booking.status === 'Checked_in'
+                      ? '✨ Checked-In'
+                      : booking.status === 'Booked'
+                      ? '📅 Booked'
+                      : '🧹 Needs Cleaning'}
                   </span>
                   <span className="booking-advance" style={booking.checked_out ? { color: 'var(--text-secondary)', fontSize: '0.7rem' } : (booking.advance_status === 'Unpaid' ? { color: '#f87171', fontSize: '0.65rem', fontWeight: 'bold' } : {})}>
                     {booking.checked_out ? '🚪 Checked Out' : (booking.advance_status === 'Unpaid' ? 'Incomplete Advance' : `₹${parseFloat(booking.advance_paid).toLocaleString('en-IN')}`)}
@@ -1491,7 +1484,7 @@ function App() {
                           <input
                             type="text"
                             className="input-control"
-                            placeholder="Receipt ID"
+                            placeholder="XXX-XXX"
                             value={newBooking.receipt_id}
                             onChange={e => setNewBooking(prev => ({ ...prev, receipt_id: e.target.value }))}
                           />
@@ -1568,7 +1561,7 @@ function App() {
                   className="context-menu-item"
                   onClick={() => {
                     setPaymentAmount('');
-                    setPaymentReceiptId(generateReceiptId());
+                    setPaymentReceiptId('');
                     setPaymentMethod('Cash');
                     setPaymentModalOpen(true);
                     setContextMenu(prev => ({ ...prev, visible: false }));
@@ -1583,7 +1576,7 @@ function App() {
                   className="context-menu-item"
                   onClick={() => {
                     setCheckoutPaymentMethod('Cash');
-                    setCheckoutReceiptId(generateReceiptId());
+                    setCheckoutReceiptId('');
                     setCheckoutModalOpen(true);
                     setContextMenu(prev => ({ ...prev, visible: false }));
                   }}
@@ -1648,10 +1641,28 @@ function App() {
                           borderRadius: '4px',
                           fontSize: '0.7rem',
                           fontWeight: 'bold',
-                          background: selectedBooking.status === 'Checked_in' ? 'rgba(34, 197, 94, 0.2)' : selectedBooking.status === 'dirty' ? 'rgba(156, 163, 175, 0.2)' : 'rgba(59, 130, 246, 0.2)',
-                          color: selectedBooking.status === 'Checked_in' ? '#4ade80' : selectedBooking.status === 'dirty' ? '#9ca3af' : '#60a5fa'
+                          background: selectedBooking.checked_out
+                            ? 'rgba(239, 68, 68, 0.2)'
+                            : selectedBooking.status === 'Checked_in'
+                            ? 'rgba(34, 197, 94, 0.2)'
+                            : selectedBooking.status === 'Booked'
+                            ? 'rgba(59, 130, 246, 0.2)'
+                            : 'rgba(239, 68, 68, 0.2)',
+                          color: selectedBooking.checked_out
+                            ? '#ef4444'
+                            : selectedBooking.status === 'Checked_in'
+                            ? '#4ade80'
+                            : selectedBooking.status === 'Booked'
+                            ? '#60a5fa'
+                            : '#ef4444'
                         }}>
-                          {selectedBooking.status === 'Checked_in' ? 'Checked-In' : selectedBooking.status === 'dirty' ? 'Dirty' : 'Booked'}
+                          {selectedBooking.checked_out
+                            ? 'Checked-Out'
+                            : selectedBooking.status === 'Checked_in'
+                            ? 'Checked-In'
+                            : selectedBooking.status === 'Booked'
+                            ? 'Booked'
+                            : 'Dirty'}
                         </span>
                       </div>
                       <div style={{ marginTop: '4px' }}>
@@ -1799,7 +1810,7 @@ function App() {
                               type="text"
                               className="input-control"
                               style={{ height: '30px', fontSize: '0.75rem', padding: '4px', width: '100%' }}
-                              placeholder="Receipt ID"
+                              placeholder="XXX-XXX"
                               value={paymentReceiptId}
                               onChange={e => setPaymentReceiptId(e.target.value)}
                             />
@@ -1845,7 +1856,7 @@ function App() {
                         style={{ background: 'rgba(167, 139, 250, 0.1)', borderColor: 'rgba(167, 139, 250, 0.3)', color: '#c084fc' }}
                         onClick={() => {
                           setCheckoutPaymentMethod('Cash');
-                          setCheckoutReceiptId(generateReceiptId());
+                          setCheckoutReceiptId('');
                           setCheckoutModalOpen(true);
                         }}
                       >
@@ -1944,7 +1955,7 @@ function App() {
                     <input
                       type="text"
                       className="input-control"
-                      placeholder="Enter receipt/transaction ID"
+                      placeholder="XXX-XXX"
                       value={paymentReceiptId}
                       onChange={e => setPaymentReceiptId(e.target.value)}
                     />
@@ -2008,7 +2019,7 @@ function App() {
                         <input
                           type="text"
                           className="input-control"
-                          placeholder="Enter transaction/receipt ID"
+                          placeholder="XXX-XXX"
                           value={checkoutReceiptId}
                           onChange={e => setCheckoutReceiptId(e.target.value)}
                         />
@@ -2187,33 +2198,23 @@ function App() {
               />
             </div>
 
-            <div className="hotel-section-title">Select Hotel to Check In</div>
-            {fetchError && (
-              <p style={{ color: '#fb923c', fontSize: '0.8rem', marginBottom: '0.5rem', textAlign: 'center' }}>
-                * Backend offline. Running in offline preview mode.
-              </p>
-            )}
-            
-            <div className="hotel-grid">
-              {hotels.map(hotel => (
-                <div
-                  key={hotel.id}
-                  className={`hotel-card ${selectedHotel?.id === hotel.id ? 'selected' : ''}`}
-                  onClick={() => !loading && setSelectedHotel(hotel)}
-                >
-                  <div className="hotel-info">
-                    <h3>{hotel.name}</h3>
-                    <p>Tap to select</p>
-                  </div>
-                  <span className="hotel-code-badge">{hotel.code}</span>
-                </div>
-              ))}
+            <div className="form-group" style={{ marginTop: '1rem', marginBottom: '1.5rem' }}>
+              <label className="form-label">Hotel Code or Name</label>
+              <input
+                type="text"
+                className="input-control"
+                placeholder="Enter hotel code or name (e.g. GPL01 or Golden Plaza)"
+                value={hotelCodeInput}
+                onChange={e => setHotelCodeInput(e.target.value)}
+                disabled={loading}
+                required
+              />
             </div>
 
             <button
               type="submit"
               className="btn-submit"
-              disabled={loading || !username || !password || !selectedHotel}
+              disabled={loading || !username || !password || !hotelCodeInput}
             >
               {loading ? 'Authenticating...' : 'Sign In'}
             </button>
