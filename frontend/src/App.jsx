@@ -4122,7 +4122,7 @@ function App() {
           {isRegisterMode ? (
             // Customer Registration Form
             <form onSubmit={handleRegister}>
-              <h2 style={{ fontSize: '3.2rem', marginBottom: '3.5rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '20px', color: '#a78bfa', textAlign: 'center' }}>📝 Register Guest Account</h2>
+              <h2 style={{ fontSize: '4.5rem', marginBottom: '4rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '24px', color: '#a78bfa', textAlign: 'center' }}>📝 Register Guest Account</h2>
               
               <div className="form-group">
                 <label className="form-label">Email Address (Username)</label>
@@ -4158,7 +4158,7 @@ function App() {
                 {loading ? 'Registering Account...' : 'Register'}
               </button>
 
-              <div style={{ textAlign: 'center', marginTop: '2rem', fontSize: '1.25rem' }}>
+              <div style={{ textAlign: 'center', marginTop: '2.5rem', fontSize: '1.6rem' }}>
                 Already have an account?{' '}
                 <span 
                   onClick={() => setIsRegisterMode(false)} 
@@ -4171,7 +4171,7 @@ function App() {
           ) : (
             // Login Form
             <form onSubmit={handleLogin}>
-              <h2 style={{ fontSize: '3.2rem', marginBottom: '3.5rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '20px', color: '#a78bfa', textAlign: 'center' }}>🔑 Sign In</h2>
+              <h2 style={{ fontSize: '4.5rem', marginBottom: '4rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '24px', color: '#a78bfa', textAlign: 'center' }}>🔑 Sign In</h2>
               
               <div className="form-group">
                 <label className="form-label">Username</label>
@@ -4220,7 +4220,7 @@ function App() {
                 {loading ? 'Authenticating...' : 'Sign In'}
               </button>
 
-              <div style={{ textAlign: 'center', marginTop: '2rem', fontSize: '1.25rem' }}>
+              <div style={{ textAlign: 'center', marginTop: '2.5rem', fontSize: '1.6rem' }}>
                 New guest?{' '}
                 <span 
                   onClick={() => setIsRegisterMode(true)} 
