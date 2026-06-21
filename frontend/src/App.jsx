@@ -1594,7 +1594,6 @@ function App() {
                       </>
                     )}
 
-                    {/* KYC Verification Section */}
                     <div className="form-group col-span-2" style={{ borderTop: '1px solid rgba(255, 255, 255, 0.05)', paddingTop: '12px', marginTop: '12px' }}>
                       <label className="form-label" style={{ fontWeight: 'bold', fontSize: '0.85rem', color: 'var(--primary)' }}>🆔 Customer KYC Verification</label>
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '8px' }}>
@@ -1608,8 +1607,6 @@ function App() {
                           >
                             <option value="Aadhaar">Aadhaar</option>
                             <option value="PAN">PAN Card</option>
-                            <option value="Passport">Passport</option>
-                            <option value="VoterID">Voter ID</option>
                           </select>
                         </div>
                         <div>
@@ -1631,7 +1628,7 @@ function App() {
                             type="file"
                             accept="image/*,application/pdf"
                             className="input-control"
-                            style={{ padding: '8px', fontSize: '0.75rem', height: 'auto' }}
+                            style={{ padding: '10px 12px', fontSize: '0.8rem', height: '48px', boxSizing: 'border-box' }}
                             onChange={e => {
                               const file = e.target.files[0];
                               setNewBooking(prev => ({ ...prev, kyc_front: file }));
@@ -1644,7 +1641,7 @@ function App() {
                             type="file"
                             accept="image/*,application/pdf"
                             className="input-control"
-                            style={{ padding: '8px', fontSize: '0.75rem', height: 'auto' }}
+                            style={{ padding: '10px 12px', fontSize: '0.8rem', height: '48px', boxSizing: 'border-box' }}
                             onChange={e => {
                               const file = e.target.files[0];
                               setNewBooking(prev => ({ ...prev, kyc_back: file }));
@@ -1808,16 +1805,31 @@ function App() {
                     return (
                       <div className="info-section-card">
                         <h4 className="info-section-title">👤 Guest & Stay Information</h4>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '0.8rem' }}>
-                          <div><strong>Guest:</strong> {selectedBooking.guest_first_name} {selectedBooking.guest_last_name}</div>
-                          <div><strong>Phone:</strong> {selectedBooking.guest_phone}</div>
-                          <div><strong>Email:</strong> {selectedBooking.guest_email || 'N/A'}</div>
-                          <div><strong>Room Category:</strong> {selectedBooking.room_type}</div>
-                          <div><strong>Stay Duration:</strong> {selectedBooking.check_in} to {selectedBooking.check_out}</div>
-                          <div><strong>Check-in Time:</strong> {selectedBooking.check_in_time}</div>
-                          <div><strong>Check-out Time:</strong> {selectedBooking.check_out_time}</div>
-                          <div style={{ marginTop: '4px' }}>
-                            <strong>Status:</strong> <span style={{
+                        <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr', gap: '8px 12px', fontSize: '0.85rem' }}>
+                          <span style={{ color: 'var(--text-secondary)' }}>Guest:</span>
+                          <strong>{selectedBooking.guest_first_name} {selectedBooking.guest_last_name}</strong>
+
+                          <span style={{ color: 'var(--text-secondary)' }}>Phone:</span>
+                          <strong>{selectedBooking.guest_phone}</strong>
+
+                          <span style={{ color: 'var(--text-secondary)' }}>Email:</span>
+                          <strong>{selectedBooking.guest_email || 'N/A'}</strong>
+
+                          <span style={{ color: 'var(--text-secondary)' }}>Room Category:</span>
+                          <strong>{selectedBooking.room_type}</strong>
+
+                          <span style={{ color: 'var(--text-secondary)' }}>Stay Duration:</span>
+                          <strong>{selectedBooking.check_in} to {selectedBooking.check_out}</strong>
+
+                          <span style={{ color: 'var(--text-secondary)' }}>Check-in Time:</span>
+                          <strong>{selectedBooking.check_in_time}</strong>
+
+                          <span style={{ color: 'var(--text-secondary)' }}>Check-out Time:</span>
+                          <strong>{selectedBooking.check_out_time}</strong>
+
+                          <span style={{ color: 'var(--text-secondary)' }}>Status:</span>
+                          <div>
+                            <span style={{
                               padding: '2px 6px',
                               borderRadius: '4px',
                               fontSize: '0.7rem',
@@ -1846,8 +1858,10 @@ function App() {
                                 : 'Checked-Out'}
                             </span>
                           </div>
-                          <div style={{ marginTop: '4px' }}>
-                            <strong>Cleanliness:</strong> <span style={{
+
+                          <span style={{ color: 'var(--text-secondary)' }}>Cleanliness:</span>
+                          <div>
+                            <span style={{
                               padding: '2px 6px',
                               borderRadius: '4px',
                               fontSize: '0.7rem',
@@ -1858,84 +1872,90 @@ function App() {
                               {roomCleanliness === 'dirty' ? '🧹 Needs Cleaning' : '✨ Cleaned'}
                             </span>
                           </div>
-                          
-                          {/* KYC Info Section */}
-                          {selectedBooking.kyc && selectedBooking.kyc.kyc_type && (
-                            <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '8px', marginTop: '8px' }}>
-                              <div style={{ fontWeight: 'bold', fontSize: '0.75rem', color: 'var(--primary)', marginBottom: '4px' }}>🆔 Guest KYC Info</div>
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                <div><strong>Type:</strong> {selectedBooking.kyc.kyc_type}</div>
-                                <div><strong>Number:</strong> {selectedBooking.kyc.kyc_number || 'N/A'}</div>
-                                <div>
-                                  <strong>KYC Verified:</strong>{' '}
-                                  <span style={{
+                        </div>
+
+                        {/* KYC Info Section */}
+                        {selectedBooking.kyc && selectedBooking.kyc.kyc_type && (
+                          <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '12px', marginTop: '12px' }}>
+                            <div style={{ fontWeight: 'bold', fontSize: '0.85rem', color: 'var(--primary)', marginBottom: '8px' }}>🆔 Guest KYC Info</div>
+                            <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr', gap: '8px 12px', fontSize: '0.85rem' }}>
+                              <span style={{ color: 'var(--text-secondary)' }}>Document Type:</span>
+                              <strong>{selectedBooking.kyc.kyc_type}</strong>
+
+                              <span style={{ color: 'var(--text-secondary)' }}>Document Number:</span>
+                              <strong>{selectedBooking.kyc.kyc_number || 'N/A'}</strong>
+
+                              <span style={{ color: 'var(--text-secondary)' }}>KYC Verified:</span>
+                              <div>
+                                <span style={{
+                                  padding: '2px 6px',
+                                  borderRadius: '4px',
+                                  fontSize: '0.7rem',
+                                  fontWeight: 'bold',
+                                  background: selectedBooking.kyc.kyc_verified ? 'rgba(34, 197, 94, 0.2)' : 'rgba(245, 158, 11, 0.2)',
+                                  color: selectedBooking.kyc.kyc_verified ? '#4ade80' : '#fbbf24'
+                                }}>
+                                  {selectedBooking.kyc.kyc_verified ? '✅ Verified' : '⚠️ Pending Verification'}
+                                </span>
+                                <button
+                                  type="button"
+                                  className="btn-submit-modal"
+                                  style={{
+                                    marginLeft: '10px',
                                     padding: '2px 6px',
-                                    borderRadius: '4px',
-                                    fontSize: '0.7rem',
-                                    fontWeight: 'bold',
-                                    background: selectedBooking.kyc.kyc_verified ? 'rgba(34, 197, 94, 0.2)' : 'rgba(245, 158, 11, 0.2)',
-                                    color: selectedBooking.kyc.kyc_verified ? '#4ade80' : '#fbbf24'
-                                  }}>
-                                    {selectedBooking.kyc.kyc_verified ? '✅ Verified' : '⚠️ Pending Verification'}
-                                  </span>
-                                  <button
-                                    type="button"
-                                    className="btn-submit-modal"
-                                    style={{
-                                      marginLeft: '10px',
-                                      padding: '2px 6px',
-                                      fontSize: '0.65rem',
-                                      height: 'auto',
-                                      width: 'auto',
-                                      background: selectedBooking.kyc.kyc_verified ? 'rgba(239, 68, 68, 0.1)' : 'rgba(34, 197, 94, 0.1)',
-                                      borderColor: selectedBooking.kyc.kyc_verified ? 'rgba(239, 68, 68, 0.3)' : 'rgba(34, 197, 94, 0.3)',
-                                      color: selectedBooking.kyc.kyc_verified ? '#ef4444' : '#34d399'
-                                    }}
-                                    onClick={() => handleToggleKYCVerification(selectedBooking.id, !selectedBooking.kyc.kyc_verified)}
+                                    fontSize: '0.65rem',
+                                    height: 'auto',
+                                    width: 'auto',
+                                    background: selectedBooking.kyc.kyc_verified ? 'rgba(239, 68, 68, 0.1)' : 'rgba(34, 197, 94, 0.1)',
+                                    borderColor: selectedBooking.kyc.kyc_verified ? 'rgba(239, 68, 68, 0.3)' : 'rgba(34, 197, 94, 0.3)',
+                                    color: selectedBooking.kyc.kyc_verified ? '#ef4444' : '#34d399'
+                                  }}
+                                  onClick={() => handleToggleKYCVerification(selectedBooking.id, !selectedBooking.kyc.kyc_verified)}
+                                >
+                                  {selectedBooking.kyc.kyc_verified ? 'Mark Unverified' : 'Verify KYC'}
+                                </button>
+                              </div>
+
+                              <span style={{ color: 'var(--text-secondary)' }}>Uploaded ID Files:</span>
+                              <div style={{ display: 'flex', gap: '8px' }}>
+                                {selectedBooking.kyc.kyc_front && (
+                                  <a 
+                                    href={`http://127.0.0.1:8000${selectedBooking.kyc.kyc_front}`} 
+                                    target="_blank" 
+                                    rel="noopener noreferrer"
+                                    style={{ textDecoration: 'none' }}
                                   >
-                                    {selectedBooking.kyc.kyc_verified ? 'Mark Unverified' : 'Verify KYC'}
-                                  </button>
-                                </div>
-                                <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
-                                  {selectedBooking.kyc.kyc_front && (
-                                    <a 
-                                      href={`http://127.0.0.1:8000${selectedBooking.kyc.kyc_front}`} 
-                                      target="_blank" 
-                                      rel="noopener noreferrer"
-                                      style={{ textDecoration: 'none' }}
-                                    >
-                                      <div style={{ border: '1px solid rgba(255,255,255,0.1)', padding: '4px', borderRadius: '4px', textAlign: 'center', background: 'rgba(0,0,0,0.2)' }}>
-                                        <div style={{ fontSize: '0.6rem', color: 'var(--text-secondary)' }}>ID Front</div>
-                                        <img 
-                                          src={`http://127.0.0.1:8000${selectedBooking.kyc.kyc_front}`} 
-                                          alt="KYC Front" 
-                                          style={{ height: '40px', objectFit: 'contain', display: 'block', margin: '4px auto 0' }}
-                                        />
-                                      </div>
-                                    </a>
-                                  )}
-                                  {selectedBooking.kyc.kyc_back && (
-                                    <a 
-                                      href={`http://127.0.0.1:8000${selectedBooking.kyc.kyc_back}`} 
-                                      target="_blank" 
-                                      rel="noopener noreferrer"
-                                      style={{ textDecoration: 'none' }}
-                                    >
-                                      <div style={{ border: '1px solid rgba(255,255,255,0.1)', padding: '4px', borderRadius: '4px', textAlign: 'center', background: 'rgba(0,0,0,0.2)' }}>
-                                        <div style={{ fontSize: '0.6rem', color: 'var(--text-secondary)' }}>ID Back</div>
-                                        <img 
-                                          src={`http://127.0.0.1:8000${selectedBooking.kyc.kyc_back}`} 
-                                          alt="KYC Back" 
-                                          style={{ height: '40px', objectFit: 'contain', display: 'block', margin: '4px auto 0' }}
-                                        />
-                                      </div>
-                                    </a>
-                                  )}
-                                </div>
+                                    <div style={{ border: '1px solid rgba(255,255,255,0.1)', padding: '4px', borderRadius: '4px', textAlign: 'center', background: 'rgba(0,0,0,0.2)' }}>
+                                      <div style={{ fontSize: '0.6rem', color: 'var(--text-secondary)' }}>ID Front</div>
+                                      <img 
+                                        src={`http://127.0.0.1:8000${selectedBooking.kyc.kyc_front}`} 
+                                        alt="KYC Front" 
+                                        style={{ height: '40px', objectFit: 'contain', display: 'block', margin: '4px auto 0' }}
+                                      />
+                                    </div>
+                                  </a>
+                                )}
+                                {selectedBooking.kyc.kyc_back && (
+                                  <a 
+                                    href={`http://127.0.0.1:8000${selectedBooking.kyc.kyc_back}`} 
+                                    target="_blank" 
+                                    rel="noopener noreferrer"
+                                    style={{ textDecoration: 'none' }}
+                                  >
+                                    <div style={{ border: '1px solid rgba(255,255,255,0.1)', padding: '4px', borderRadius: '4px', textAlign: 'center', background: 'rgba(0,0,0,0.2)' }}>
+                                      <div style={{ fontSize: '0.6rem', color: 'var(--text-secondary)' }}>ID Back</div>
+                                      <img 
+                                        src={`http://127.0.0.1:8000${selectedBooking.kyc.kyc_back}`} 
+                                        alt="KYC Back" 
+                                        style={{ height: '40px', objectFit: 'contain', display: 'block', margin: '4px auto 0' }}
+                                      />
+                                    </div>
+                                  </a>
+                                )}
                               </div>
                             </div>
-                          )}
-                        </div>
+                          </div>
+                        )}
 
                         <div style={{ marginTop: '1rem' }}>
                           <h4 className="info-section-title">📝 Special Notes & Requests</h4>
