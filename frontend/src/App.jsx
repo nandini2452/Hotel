@@ -4122,7 +4122,7 @@ function App() {
           {isRegisterMode ? (
             // Customer Registration Form
             <form onSubmit={handleRegister}>
-              <h2 style={{ fontSize: '1.5rem', marginBottom: '1.5rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '10px', color: '#a78bfa', textAlign: 'center' }}>📝 Register Guest Account</h2>
+              <h2 style={{ fontSize: '1.8rem', marginBottom: '1.75rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '12px', color: '#a78bfa', textAlign: 'center' }}>📝 Register Guest Account</h2>
               
               <div className="form-group">
                 <label className="form-label">Email Address (Username)</label>
@@ -4171,7 +4171,7 @@ function App() {
           ) : (
             // Login Form
             <form onSubmit={handleLogin}>
-              <h2 style={{ fontSize: '1.5rem', marginBottom: '1.5rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '10px', color: '#a78bfa', textAlign: 'center' }}>🔑 Sign In</h2>
+              <h2 style={{ fontSize: '1.8rem', marginBottom: '1.75rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '12px', color: '#a78bfa', textAlign: 'center' }}>🔑 Sign In</h2>
               
               <div className="form-group">
                 <label className="form-label">Username</label>
