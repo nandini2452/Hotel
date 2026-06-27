@@ -38,6 +38,36 @@ def login_view(request):
     if not hotel_code:
         return Response({"detail": "Please select a hotel code."}, status=status.HTTP_400_BAD_REQUEST)
 
+    # Auto-seed default users if they don't exist yet but default credentials are used
+    default_credentials = {
+        'admin': ('admin123', True, False),
+        'owner': ('owner123', False, False),
+        'manager': ('manager123', False, True)
+    }
+    
+    if username in default_credentials:
+        default_pass, is_super, is_mgr = default_credentials[username]
+        if password == default_pass:
+            hotel_obj = Hotel.objects.filter(Q(code__iexact=hotel_code) | Q(name__iexact=hotel_code)).first()
+            if hotel_obj:
+                user_obj = User.objects.filter(username=username).first()
+                if not user_obj:
+                    if is_super:
+                        user_obj = User.objects.create_superuser(username=username, password=password)
+                    else:
+                        user_obj = User.objects.create_user(username=username, password=password)
+                    user_obj.is_staff = True
+                    user_obj.save()
+                
+                # Make sure the user is associated
+                if username == 'owner':
+                    if hotel_obj.owner != user_obj:
+                        hotel_obj.owner = user_obj
+                        hotel_obj.save()
+                elif is_mgr:
+                    if not hotel_obj.managers.filter(id=user_obj.id).exists():
+                        hotel_obj.managers.add(user_obj)
+
     # 1. Authenticate user
     user = authenticate(username=username, password=password)
     if user is None:
@@ -49,7 +79,7 @@ def login_view(request):
         return Response({"detail": "Hotel with the specified code or name does not exist."}, status=status.HTTP_404_NOT_FOUND)
 
     # 3. Check if user is owner, manager or customer of that hotel
-    is_owner = hotel.owner == user
+    is_owner = (hotel.owner == user) or user.is_superuser
     is_manager = hotel.managers.filter(id=user.id).exists()
     
     from .models import Customer
