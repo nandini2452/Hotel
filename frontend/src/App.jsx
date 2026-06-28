@@ -2487,7 +2487,7 @@ function App() {
                                     💳 Pay Bill
                                   </button>
                                 )}
-                                {b.status === 'Booked' && !b.checked_out && (
+                                {(b.status === 'Booked' || b.status === 'Requested') && !b.checked_out && (
                                   <button
                                     type="button"
                                     className="btn-cancel"

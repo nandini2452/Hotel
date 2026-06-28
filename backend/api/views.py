@@ -800,11 +800,10 @@ def my_hotel_booking_detail(request, pk):
         reason = request.query_params.get('reason') or request.data.get('reason') or ''
         action = request.query_params.get('action') or request.data.get('action') or ''
         if is_booking_customer:
-            if booking.status != 'Booked':
+            if booking.status not in ['Booked', 'Requested']:
                 return Response({"detail": "Cannot cancel a reservation that has already checked in or checked out."}, status=status.HTTP_400_BAD_REQUEST)
             booking.status = 'Cancelled'
-            if reason:
-                booking.rejection_reason = reason
+            booking.rejection_reason = reason if reason else 'Cancelled by customer'
             booking.save()
             return Response({"detail": "Booking cancelled successfully."}, status=status.HTTP_200_OK)
         else:
